@@ -1,0 +1,301 @@
+第十四章 计算资源管理
+
+### 14.1 为pod中的容器申请资源
+
+14.1.1 创建包含资源requests的pod
+
+```yaml
+vim /root/requests-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: requests-pod
+spec:
+  containers: 
+  - image: busybox
+    command: ["dd", "if=/dev/zero", "of=dev/null"]
+    name: main
+    resources:
+      requests:
+        cpu: 200m
+        memory: 10Mi
+kubectl create -f requests-pod.yaml
+
+kubectl exec -it requests-pod -- top
+```
+
+14.1.2 资源requests如何影响调度
+
+```shell
+kubectl describe nodes
+
+kubectl run requests-pod-2 --image=busybox --restart Never --requests='cpu=800m,memory=20Mi' -- dd if=/dev/zero of=dev/null
+kubectl get po requests-pod-2
+
+kubectl run requests-pod-3 --image=busybox --restart Never --requests='cpu=1,memory=20Mi' -- dd if=/dev/zero of=dev/null
+kubectl get po requests-pod-3
+
+kubectl describe po requests-pod-3 #Events 提示
+
+kubectl describe nodes #再次查看
+
+kubectl delete po requests-pod-2 #释放资源
+kubectl get po
+```
+
+14.1.3 CPU requests如何影响CPU时间分配
+
+14.1.4 定义和申请⾃定义资源
+
+### 14.2 限制容器的可用资源
+
+14.2.1 设置容器可使⽤资源量的硬限制
+
+```yaml
+vim /root/limited-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: limited-pod
+spec:
+  containers: 
+  - image: busybox
+    command: ["dd", "if=/dev/zero", "of=dev/null"]
+    name: main
+    resources:
+      limits:
+        cpu: 1
+        memory: 20Mi
+kubectl create -f limited-pod.yaml
+```
+
+14.2.2 超过limits
+
+#CrashLoopBackOff状态,要定位容器crash的原因,可以通过查看pod⽇志以及 kubectl describe pod 命令
+
+14.2.3 容器中的应⽤如何看待limits
+
+```shell
+kubectl create -f limited-pod.yaml # 14.7中的pod
+kubectl exec -it limited-pod -- top
+
+在容器内看到的始终是节点的内存,⽽不是容器本⾝的内存
+
+CPU limits做的只是限制容器使⽤的CPU时间
+
+
+cat /sys/fs/cgroup/cpu/cpu.cfs_quota_us
+cat /sys/fs/cgroup/cpu/cpu.cfs_period_us
+```
+
+### 14.3 了解pod QoS等级
+
+```
+Kubernetes将pod划分为3种QoS等级
+1 BestEffort(优先级最低)
+2 Burstable
+3 Guaranteed(优先级最⾼)
+```
+
+14.3.1 定义pod的QoS等级
+
+```
+对于⼀个Guaranteed级别的pod,有以下⼏个条件
+1 CPU和内存都要设置requests和limits
+2 每个容器都需要设置资源量
+3 它们必须相等(每个容器的每种资源的requests和limits必须相等)
+```
+
+注意 运⾏ kubectl describe pod 以及通过pod的YAML/JSON描述的status.qosClass 字段都可以查看pod的QoS等级。
+
+14.3.2 内存不⾜时哪个进程会被杀死
+
+```
+BestEffort等级的pod⾸ 先被杀掉,其次是Burstable pod,最后是Guaranteed pod
+Guaranteed pod只有在系统进程需要内存时才会被杀掉
+```
+
+如何处理相同QoS等级的容器:系统通过⽐较所有运⾏进程的OOM分数来选择要杀掉的进程
+
+OOM分数由两个参数计算得出:进程已消耗内存占可⽤内存的百分⽐,与⼀个基于pod QoS等级和容器内存申请量固定的OOM分数调节因⼦。
+
+### 14.4 为命名空间中的pod设置默认的requests和limits
+
+14.4.1 LimitRange资源简介
+
+```
+LimitRange资源被 LimitRanger准⼊控制插件
+LimitRange对象的⼀个⼴泛应⽤场景就是阻⽌⽤户创建⼤于单个节 点资源量的pod
+```
+
+14.4.2 LimitRange对象的创建
+
+```yaml
+vim /root/limits.yaml
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: example
+spec:
+  limits:
+  - type: Pod
+    min:
+      cpu: 50m
+      memory: 5Mi
+    max:
+      cpu: 1
+      memory: 1Gi
+  - type: Container
+    defaultRequest:
+      cpu: 100m
+      memory: 10Mi
+    default:
+      cpu: 200m
+      memory: 100Mi
+    min:
+      cpu: 50m
+      memory: 5Mi
+    max:
+      cpu: 1
+      memory: 1Gi
+    maxLimitRequestRatio:
+      cpu: 4
+      memory: 10
+  - type: PersistentVolumeClaim
+    min:
+      storage: 1Gi
+    max:
+      storage: 10Gi
+kubectl create -f limits.yaml
+```
+
+14.4.3 强制进⾏限制
+
+```yaml
+vim /root/limits-pod-too-big.yaml
+resources:
+  requests:
+    cpu: 2
+kubectl create -f limits-pod-too-big.yaml #需要添加一个pod或其他资源类型 补齐文件
+这个pod的容器需要 2 核CPU,⼤于之前LimitRange中设置的最⼤值,回报错
+```
+
+14.4.4 应⽤资源requests和limits的默认值
+
+```shell
+kubectl create -f kubia-manual.yaml #chapter03
+kubectl describe po kubia-manual
+$ containers
+ ...
+
+LimitRange中配置的limits只能应⽤于单独的pod或容器
+```
+
+### 14.5 限制命名空间中的可用资源总量
+
+14.5.1 ResourceQuota资源介绍
+
+```yaml
+ResourceQuota 的接纳控制插件会检查将要创建的pod是否会引起总资源量超出 ResourceQuota
+vim /root/quota-cpumemory.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: cpu-and-mem
+spec:
+  hard:
+    requests.cpu: 400m
+    requests.memory: 200Mi
+    limits.cpu: 600m
+    limits.memory: 500Mi
+kubectl create -f quota-cpumemory.yaml #ok
+需要注意的⼀点是,创建ResourceQuota时往往还需要随之创建⼀ 个LimitRange对象！！！
+否则 kubia-manual.yaml of chapter03 将无法创建成功
+
+kubectl describe quota
+
+当特定资源(CPU或内存)配置了(requests或limits)配额,在pod中必须为这些资源(分别)指定requests或limits,否则API服务器不会接收该pod的创建请求。
+```
+
+14.5.2 为持久化存储指定配额
+
+```yaml
+vim /root/quota-storage.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: storage
+spec:
+  hard:
+    requests.storage: 500Gi
+    ssd.storageclass.storage.k8s.io/requests.storage: 300Gi
+    standard.storageclass.storage.k8s.io/requests.storage: 1Ti
+kubectl create -f quota-storage.yaml #ok
+```
+
+14.5.3 限制可创建对象的个数
+
+```yaml
+vim /root/quota-objectcount.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: objects
+spec:
+  hard:
+    pods: 10
+    replicationcontrollers: 5
+    secrets: 10
+    configmaps: 10
+    persistentvolumeclaims: 4
+    services: 5
+    services.loadbalancers: 1
+    services.nodeports: 2
+    ssd.storageclass.storage.k8s.io/persistentvolumeclaims: 2
+kubectl create -f quota-objectcount.yaml #ok
+```
+
+14.5.4 为特定的pod状态或者QoS等级指定配额
+
+```yaml
+⽬前配额作用范围共有4种:BestEffort、NotBestEffort、Termination和 NotTerminating
+
+vim /root/quota-scoped.yaml
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: besteffort-notterminating-pods
+spec:
+  scopes:
+  - BestEffort
+  - NotTerminating
+  hard:
+    pods: 4
+kubectl create -f quota-scoped.yaml #有问题
+```
+
+#------------------------------------#------------------------------------#------------------------------------#
+
+删除之前创建的所有ResourceQuota和LimitRange资源！！！
+
+#------------------------------------#------------------------------------#------------------------------------#
+
+### 14.6 监控pod的资源使用量
+
+14.6.1 收集、获取实际资源使⽤情况
+
+```
+启⽤Heapster
+参考资料:https://github.com/kubernetes/heapster
+
+kubectl top node
+kubectl top node --all-namespaces
+kubectl top pod --all-namespaces
+要查看容器⽽不是pod的资源使⽤情况,可以使⽤--container选项
+
+
+14.6.2 保存并分析历史资源的使⽤统计信息
+
+InfiuxDB和Grafana都可以以pod运⾏
+部署文件:https://github.com/kubernetes-retired/heapster/blob/master/docs/influxdb.md
+kubectl cluster-info #找到Grafana web控制台的URL

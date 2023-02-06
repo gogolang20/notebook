@@ -1,0 +1,321 @@
+## 第八章 从应用访问pod元数据以及其他资源
+
+特定的pod和容器元数据如何被传递到容器
+
+在容器中运⾏的应⽤如何便捷地与Kubernetes API服务器进⾏交互,从⽽获取在集群中部署资源的信息,并且进⼀步了解如何创建和修改这些资源。
+
+### 8.1 通过Downward API传递元数据
+
+```
+对于那些不能预先知道的数据,⽐如pod的IP、主机名或者是pod⾃⾝的名称等配置数据,如何向应⽤传递
+```
+
+Downward API允许我们通过环境变量或者⽂件(在downwardAPI卷 中)的传递pod的元数据。
+
+8.1.1 了解可用的元数据
+
+```
+目前我们可以给容器传递以下数据
+1 pod的名称
+2 pod的IP
+3 pod所在的命名空间
+4 pod运行节点的名称
+5 pod运行所归属的服务账户的名称 #服务账户是pod访问API服务器时⽤来进⾏⾝份验证的账户。
+6 每个容器请求的CPU和内存的使用量
+7 每个容器可以使用的CPU和内存的限制
+8 pod的标签
+9 pod的注解
+```
+
+8.1.2 通过环境变量暴露元数据
+
+```
+vim /root/downward-api-env.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: downward
+spec:
+  containers:
+  - name: main
+    image: busybox
+    command: ["sleep", "9999999"]
+    resources:
+      requests:
+        cpu: 15m
+        memory: 100Ki
+      limits:
+        cpu: 100m
+        memory: 4Mi
+    env:
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+    - name: POD_NAMESPACE
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.namespace
+    - name: POD_IP
+      valueFrom:
+        fieldRef:
+          fieldPath: status.podIP
+    - name: NODE_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.nodeName
+    - name: SERVICE_ACCOUNT
+      valueFrom:
+        fieldRef:
+          fieldPath: spec.serviceAccountName
+    - name: CONTAINER_CPU_REQUEST_MILLICORES
+      valueFrom:
+        resourceFieldRef:
+          resource: requests.cpu
+          divisor: 1m
+    - name: CONTAINER_MEMORY_LIMIT_KIBIBYTES
+      valueFrom:
+        resourceFieldRef:
+          resource: limits.memory
+          divisor: 1Ki #1Mi
+kubectl create -f downward-api-env.yaml
+$ pod/downward created
+
+kubectl exec downward -- env
+```
+
+8.1.3 通过downwardAPI卷来传递元数据
+
+```
+如果更倾向于使⽤⽂件的⽅式⽽不是环境变量的⽅式暴露元数 据,可以定义⼀个downward API卷并挂载到容器中。
+vim /root/downward-api-volume.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: downward
+  labels:
+    foo: bar
+  annotations:
+    key1: value1
+    key2: |
+      multi
+      line
+      value
+spec:
+  containers:
+  - name: main
+    image: busybox
+    command: ["sleep", "9999999"]
+    resources:
+      requests:
+        cpu: 15m
+        memory: 100Ki
+      limits:
+        cpu: 100m
+        memory: 4Mi
+    volumeMounts:
+    - name: downward
+      mountPath: /etc/downward
+  volumes:
+  - name: downward
+    downwardAPI:
+      items:
+      - path: "podName"
+        fieldRef:
+          fieldPath: metadata.name
+      - path: "podNamespace"
+        fieldRef:
+          fieldPath: metadata.namespace
+      - path: "labels"
+        fieldRef:
+          fieldPath: metadata.labels
+      - path: "annotations"
+        fieldRef:
+          fieldPath: metadata.annotations
+      - path: "containerCpuRequestMilliCores"
+        resourceFieldRef:
+          containerName: main
+          resource: requests.cpu
+          divisor: 1m
+      - path: "containerMemoryLimitBytes"
+        resourceFieldRef:
+          containerName: main
+          resource: limits.memory
+          divisor: 1
+kubectl create -f downward-api-volume.yaml
+kubectl exec downward ls -lL /etc/downward
+注意 与configMAp和 secret卷⼀样,可以通过pod定义中downwardAPI卷的defaultMode属性来改变⽂件的访问权限设置。
+
+kubectl exec downward cat /etc/downward/labels
+kubectl exec downward cat /etc/downward/annotations
+```
+
+### 8.2 与Kubernetes API服务器交互
+
+8.2.1 探究Kubernetes REST API
+
+```
+kubectl cluster-info
+$ Kubernetes master is running at https://192.168.152.149:6443
+$ KubeDNS is running at https://192.168.152.149:6443/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+
+curl https://192.168.152.149:6443 -k
+使⽤curl的--insecure(或-k)选项来跳过服务器证书检查环节
+
+通过Kubectl proxy访问API服务器
+kubectl proxy 
+$ Starting to serve on 127.0.0.1:8001
+
+kubectl proxy 命令启动了⼀个代理服务来接收来⾃你本机的HTTP连接并转发⾄API服务器,同时处理⾝份认证,所以不需要每次请求都 上传认证凭证。它也可以确保我们直接与真实的API服务器交互,⽽不是⼀个中间⼈(通过每次验证服务器证书的⽅式)。
+
+curl http://localhost:8001
+curl localhost:8001 #重开一个终端访问
+$ {
+$   "paths": [
+$     "/api",
+$     "/api/v1"
+ ...
+我们发送请求给代理,代理接着发送请求给API服务器,然后代理将返回从服务器返回的所有信息
+
+通过Kubectl proxy研究Kubernetes API
+curl http://localhost:8001/apis/batch
+curl localhost:8001/apis/batch/v1
+
+curl localhost:8001/apis/batch/v1/jobs
+my-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: my-job
+spec:
+  template:
+    metadata:
+      labels:
+        app: batch-job
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: main
+        image: luksa/batch-job
+kubectl create -f my-job.yaml
+$ job.batch/my-job created
+
+通过名称恢复⼀个指定的Job实例
+前⾯的endpoint返回了跨命名空间的所有Job的清单,如果想要返回指定的⼀个Job,需要在URL中指定它的名称和所在的命名空间。为了恢复在之前清单中的⼀个Job(name:my-job;namespace:dfault),需 要访问路径:
+curl localhost:8001/apis/batch/v1/namespaces/default/jobs/my-job 
+#kubectl get job my-job -o json 与上方信息一致
+$ {
+$   "kind": "Status",
+$   "apiVersion": "v1",
+$   "metadata": {
+ ...
+```
+
+8.2.2 从pod内部与API服务器进行交互
+
+```
+确定API 服务器的位置
+确保是与 API 服务器进行交互,而不是一个冒名者
+通过服务器的认证,否则将不能查看 任何内容以及进行任何操作
+
+vim /root/curl.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: curl
+spec:
+  containers:
+  - name: main
+    image: tutum/curl
+    command: ["sleep", "9999999"]
+kubectl create -f curl.yaml
+$ pod/curl created
+
+kubectl exec -it curl -- /bin/bash
+#容器内部执行
+env | grep KUBERNETES_SERVICE
+$ KUBERNETES_SERVICE_PORT=443
+$ KUBERNETES_SERVICE_HOST=10.96.0.1
+$ KUBERNETES_SERVICE_PORT_HTTPS=443
+# kubectl get svc 获取API服务器的IP地址和端口一致
+$ kubernetes           ClusterIP      10.96.0.1        <none>                    443/TCP
+
+curl https://kubernetes #会报错,curl https://kubernetes -k 可以访问,但是不建议
+ls /var/run/secrets/kubernetes.io/serviceaccount #secrets
+$ ca.crt    namespace  token
+
+curl --cacert /var/run/secrets/kubernetes.io/serviceaccount/ca.crt https://kubernetes
+$ {
+$   "kind": "Status",
+$   "apiVersion": "v1",
+ ...
+#curl允许使⽤-cacert选项来指定CA证书
+
+设置CURL_CA_BUNDLE环境变量来简化操作,从⽽不必在每次运⾏curl时都指定--cacert选项
+export CURL_CA_BUNDLE=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+curl https://kubernetes #ok
+
+获得API服务器授权
+可以使⽤凭证来访问API服务器,第⼀步,将凭证挂载到环境变量中:
+TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+向API服务器发送请求时使⽤它
+curl -H "Authorization: Bearer $TOKEN" https://kubernetes #ok
+```
+
+```
+关闭基于角色的访问控制(RBAC)
+绕过RBAC⽅式 #永远都不应该在⽣产的集群中执⾏ ！！！
+kubectl create clusterrolebinding permissive-binding \
+--clusterrole=cluster-admin \
+--group=system:serviceaccounts
+$ clusterrolebinding.rbac.authorization.k8s.io/permissive-binding created
+
+获取当前运⾏pod所在的命名空间
+NS=$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)
+curl -H "Authorization: Bearer $TOKEN" https://kubernetes/api/vl/namespaces/$NS/pods
+
+定义 CRUD代表创建、读取、修改和删除操作,与之对应的HTTP⽅法分别是POST、GET、PATCH/PUT以及DELETE。
+```
+
+8.2.3 通过ambassador容器简化与API服务器的交互
+
+```
+ambassador容器模式介绍
+启动⼀个ambassador容器,并在其中运⾏kubecctl proxy命令,通过它来实现与API服务器的交互。
+在这种模式下,运⾏在主容器中的应⽤不是直接与API服务器进⾏交互,⽽是通过HTTP协议(不是HTTPS协议)与ambassador连接,并且由ambassador通过HTTPS协议来连接API服务器,对应⽤透明地来处理安全问题。这种⽅式同样使⽤了默认凭证Secret卷中的⽂件。
+```
+
+```
+运⾏带有附加ambassador容器的CURL pod
+vim /root/curl-with-ambassador.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: curl-with-ambassador
+spec:
+  containers:
+  - name: main
+    image: tutum/curl
+    command: ["sleep", "9999999"]
+  - name: ambassador
+    image: luksa/kubectl-proxy:1.6.2
+kubectl create -f curl-with-ambassador.yaml
+$ pod/curl-with-ambassador created
+
+kubectl exec -it curl-with-ambassador -c main -- bash
+
+通过ambassador来与API服务器进⾏交互
+curl localhost:8001
+$ {
+$   "paths": [
+$     "/api",
+ ...
+curl向在ambassador容器内运⾏的代理发送普通的HTTP请求(不包含任何授权相关的标头),然后代理向API服务器发送HTTPS请求,通过发送凭证来对客户端授权,同时通过验证证书来识别服务器的身份。
+```
+
+8.2.4 使用客户端库与API服务器交互
+
+```
+Golang client—https://github.com/kubernetes/client-go
+使用客户端列出、创建、更新和删除pod
+```

@@ -1,0 +1,41 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.a
+*.DS_Store
+*.mmdb
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+output
+bin
+main
+cli
+db
+
+# Dependency directories
+vendor/
+
+# Config file
+*config.yaml
+*config.json
+*.conf
+.netrc
+
+# IDE
+.idea
+.vscode
+release/
+tmp/
+
+# gen code from protos
+api/gen
+docs/*
+
+*.txt

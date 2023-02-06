@@ -1,0 +1,11 @@
+AX BX CX DX #通用寄存器
+DS ES SS CS #段寄存器
+SP BP #stack顶寄存器 基地址寄存器
+SI DI
+IP 
+FLAGS #标志位寄存器
+
+
+地址总线
+数据总线
+控制总线

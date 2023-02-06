@@ -1,0 +1,113 @@
+第三章 pod:运行于Kubernetes中的容器
+
+3.2 YAML JSON 主文件创建pod
+apiVersion:
+kind: 
+metadata 包括名称、命名空间、标签和关于该容器的其他信息。
+spec 包含pod内容的实际说明,例如pod的容器、卷和其他数据。
+status 包含运⾏中的pod的当前信息,例如pod所处的条件、每个容器的描述和状态,以及内部IP和其他基本信息。
+# metadata spec status 三大重要部分,典型结构
+# 在创建新的pod时,永远不需要提供status部分。
+
+
+**** **** **** kubia-manual.yaml **** **** ****
+
+kubectl create -f kubia-manual.yaml #创建一个pod
+kubectl get pod kubia-manual -o yaml
+kubectl get pod kubia-manual -o json
+
+kubectl explain pods #发现可能的API对象字段
+kubectl explain pod.spec #yaml文件pod的spec字段
+
+kubectl logs {podName} #查看日志
+eg:kubectl logs kubia-manual
+kubectl logs {podName} -c {containerName} #-c <容器名称>选项来显式指定容器名称
+eg:kubectl logs kubia-manual -c kubia
+
+将本地⽹络端⼜转发到pod中的端口
+kubectl port-forward {podName} 8888:8080 #本地网络转发到pod端口
+eg:kubectl port-forward kubia-manual 8888:8080 
+curl localhost:8888 #另开一个终端访问
+$ You've hit kubia-manual
+
+
+3.3 使用标签组织pod
+**** **** **** kubia-manual-with-labels.yaml **** **** ****
+
+kubectl create -f kubia-manual-with-labels.yaml
+
+kubectl get po --show-labels #查看标签
+kubectl get po -L creation_method,env #-L选项指定某些感兴趣的标签
+
+修改标签
+kubectl label po kubia-manual creation_method=manual #添加一个标签
+kubectl label po kubia-manual-v2 env=debug --overwrite #修改一个标签
+#需要添加--overwrite
+
+
+3.4 通过标签选择器列出pod子集
+标签选择器根据资源的以下条件来选择资源:
+1 包含(或不包含)使⽤特定键的标签
+2 包含具有特定键和值的标签
+3 包含具有特定键的标签,但其值与我们指定的不同
+
+kubectl get pod -l creation_method=manual 
+kubectl get po -l env #列出包含env标签的所有pod, 无论其值如何
+kubectl get po -l '!env' #列出没有env标签的pod
+kubectl get pod -l creation_method=manual,env=prod 
+
+
+3.5 使用标签和选择器来约束pod调度
+
+kubectl label node {nodeName} gpu=true
+eg:kubectl label node k8s-node02 gpu=true
+
+kubectl get nodes -l gpu=true #筛选出满足条件的node
+kubectl get nodes -L gpu
+
+**** **** **** kubia-gpu.yaml **** **** ****
+
+kubectl create -f kubia-gpu.yaml
+
+
+3.6 注解 pod
+kubectl get po {podName} -o yaml #pod的注解
+eg:kubectl get pod kubia-gpu -o yaml
+eg:kubectl describe po kubia-gpu
+
+3.6.2 添加和修改注解
+kubectl annotate pod kubia-manual mycompany.com/someannotation="foo bar"
+$ pod/kubia-manual annotated
+kubectl describe pod kubia-manual
+$ Annotations: mycompany.com/someannotation: foo bar
+
+
+3.7 使用命名空间对资源进行分组
+kubectl get po --namespace kube-system #也可以使用-n 来代替 --namespace
+# 指定命名空间查看对应资源
+**** **** **** custom-namespace.yaml **** **** ****
+kubectl create -f custom-namespace.yaml #命名空间不允许包含点号
+$ namespace/custom-namespace created
+kubectl create namespace custom-namespace #同样可以创建
+
+kubectl create -f kubia-manual.yaml -n custom-namespace #指定命名空间创建pod
+kubectl get pods -n custom-namespace
+
+
+3.8 停止和移除pod
+kubectl delete po kubia-gpu
+#格式:kubectl delete po podl pod2
+#Kubernetes向进程发送一个SIGTERM信号并等待一定的秒数(默认为30),使其正常关闭。如果它没有及时关闭,则通过SIGKILL终止该进程
+
+使用标签选择器删除 pod
+kubectl delete po -l creation_method=manual
+
+通过删除整个命名空间来删除 pod
+kubectl delete ns custom-namespace 
+
+删除命名空间中的所有 pod ,但保留命名空间
+kubectl delete po --all #replicationCcontroller需要通过其他方式删除
+
+删除命名空间中的(几乎)所有资源
+kubectl delete all --all #Secret 会被保留
+

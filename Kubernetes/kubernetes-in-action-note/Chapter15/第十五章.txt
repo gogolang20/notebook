@@ -1,0 +1,108 @@
+## 第十五章 自动横向伸缩pod与集群节点
+
+### 15.1 pod的横向自动伸缩
+
+横向pod⾃动伸缩是指由控制器管理的pod副本数量的自动伸缩
+
+15.1.1 了解⾃动伸缩过程
+
+```
+⾃动伸缩的过程可以分为三个步骤:
+1 获取被伸缩资源对象所管理的所有pod度量。
+2 计算使度量数值到达(或接近)所指定⽬标数值所需的pod数量。
+3 更新被伸缩资源的replicas字段。
+```
+
+15.1.2 基于CPU使⽤率进⾏⾃动伸缩
+
+```yaml
+vim /root/deployment.yaml
+apiVersion: extensions/v1
+kind: Deployment
+metadata:
+  name: kubia
+spec:
+  replicas: 3
+  template:
+    metadata:
+      name: kubia
+      labels: 
+        app: kubia
+    spec:
+      containers:
+      - image: luksa/kubia:v1
+        name: nodejs
+        resources:
+          requests:
+            cpu: 100m
+kubectl create -f deployment.yaml
+
+HorizontalpodAutoscaler(HPA)
+kubectl autoscale deployment kubia --cpu-percent=30 --min=1 --max=5
+kubectl get hpa.v2beta1.autoscaling kubia -o yaml
+
+kubectl get hpa
+kubectl get deployment
+kubectl describe hpa
+
+kubectl expose deployment kubia --port=80 --target-port=8080 #暴露端口
+watch -n 1 kubectl get hpa,deployment #需要使⽤两个终端来同时观察HPA与Deployment对象
+
+kubectl run -it --rm --restart=Never loadgenerator --image=busybox -- sh -c "while true; do wget -O --q http://kubia.defaule; done" #另一个终端打开
+```
+
+```
+通过编辑HPA资源来提⾼⽬标CPU使⽤率
+ ...
+spec:
+  maxReplicas: 5
+  metrics: 
+  - resource:
+      name: cpu
+      targetAverageUtilization: 60
+    type: Resource
+ ...
+```
+
+15.1.3 基于内存使⽤进⾏⾃动伸缩
+
+```
+新版本支持,与基于cpu相似
+```
+
+15.1.4 基于其他⾃定义度量进⾏⾃动伸缩
+
+可以在HPA对象中使⽤三种度量
+1 定义 metric类型
+2 使⽤情况会被监控的资源
+3 资源的⽬标使⽤量
+
+
+15.1.6 缩容到0个副本
+空载(idling)与解除空载(un-idling),即允许提供特定服 务的pod被缩容到0副本。在新的请求到来时,请求会先被阻塞,直到pod被启动,从⽽请求被转发到新的pod为⽌。
+Kubernetes⽬前暂时没有提供这个特性,但在未来会实现。
+
+
+15.2 pod的纵向自动伸缩
+15.2.2 修改运⾏中pod的资源请求
+
+### 15.3 集群节点的横向伸缩
+
+15.3.1 Cluster Autoscaler介绍
+
+kubectl cordon <node>标记节点为不可调度(但对其上的pod不做任何事)。
+kubectl drain <node>标记节点为不可调度,随后疏散其上所有pod。
+两种情形下,在你⽤kubectl uncordon <node>解除节点的不可调度状态之前,不会有新pod被调度到该节点
+
+
+15.3.2 启用Cluster Autoscaler
+
+15.3.3 限制集群缩容时的服务干扰
+kubectl create poddisruptionbudget #创建PodDisruptionBudget(PDB)资源
+
+kubectl create pdb kubia-pdb --selector=app=kubia --min-available=3 
+kubectl get pdb kubia-pdb -o yaml
+ ...
+ apiVersion: policy/v1beta1
+ kind: PodDisruptionBudget
+ ...

@@ -1,0 +1,987 @@
+go-zero入门视频地址
+https://www.bilibili.com/video/BV1LS4y1U72n?spm_id_from=333.788.top_right_bar_window_history.content.click
+
+github项目地址
+https://github.com/Mikaelemmmm/go-zero-looklook
+
+go-zero github地址
+https://github.com/zeromicro/go-zero
+
+go-zero官网
+https://go-zero.dev/cn/
+#---------------------------------------#---------------------------------------#
+环境搭建
+#---------------------------------------#---------------------------------------#
+go-zero
+	go get -u github.com/zeromicro/go-zero
+goctl
+	# for Go 1.16 and later #需要足够的内存
+	go install github.com/zeromicro/go-zero/tools/goctl@latest
+protoc
+	https://github.com/protocolbuffers/protobuf/releases/tag/v3.19.4 #安装包
+	
+protoc-gen-go
+	#go get -u github.com/golang/protobuf/protoc-gen-go
+	#go get google.golang.org/protobuf/cmd/protoc-gen-go 
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+protoc-gen-go-grpc
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+	#go get google.golang.org/grpc/cmd/protoc-gen-go-grpc
+
+
+
+#一键安装环境  goctl版本大于等于 1.3.3
+goctl env check -i -f
+$ protoc
+$ protoc-gen-go
+$ protoc-gen-go-grpc
+
+#---------------------------------------#---------------------------------------#
+三 go-zero杀手锏goctl详细使用
+#---------------------------------------#---------------------------------------#
+syntax="v1"
+
+info (
+	author:"sss"
+	date:"2022.4.1"
+	desc:"api info"
+)
+
+type (
+	UserInfoReq {
+		UserId int64 `json:"userId"`
+	}
+	UserInfoResp {
+		UserId   int64  `json:"userId"`
+		NiceName string `json:"nickname"`
+	}
+)
+
+service user-api{
+	@doc "get user info"
+	@handler userinfo
+	post /user/info (UserInfoReq) returns (UserInfoResp)
+}
+
+goctl api doc --dir ./  # .api 文件同级目录使用
+goctl api go -api *.api -dir ../ --style=goZero # .api 文件同级目录使用
+
+goctl docker -go user.go #user.go 同级目录使用
+
+goctl kube deploy -name user-api -namespace default -image user-api:v1 -o user-api.yaml -port 8090 -nodePort 31001  #user.go 同级目录使用
+
+
+.proto 文件使用
+goctl rpc protoc *.proto --go_out=../ --go-grpc_out=../ --zrpc_out=../ --style=goZero 
+
+#执行数据库中对应的信息
+CREATE TABLE  if not exists  `test` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `t_name` varchar(20) DEFAULT "",
+  `t_number` bigint unsigned DEFAULT 0,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+goctl model mysql datasource -url="debian-sys-maint:exVcT6ajnKizd0P6@tcp(127.0.0.1:3306)/test" -table="test" -dir="./model" -cache=true --style=goZero #model 上级目录执行
+goctl model mysql datasource -url="${username}:${passwd}@tcp(${host}:${port})/${dbname}" -table="${tables}"  -dir="${modeldir}" -cache=true --style=goZero
+
+#---------------------------------------#---------------------------------------#
+五 api服务之api文件
+#---------------------------------------#---------------------------------------#
+zero-demo/user-api/api/user.api #文件路径
+syntax="v1"
+
+info (
+	author:"sss"
+	date:"2022.4.1"
+	desc:"api info"
+)
+
+type (
+	UserInfoReq {
+		UserId int64 `json:"userId"`
+	}
+	UserInfoResp {
+		UserId   int64  `json:"userId"`
+		NiceName string `json:"nickname"`
+	}
+)
+
+type (
+	UserUpdateReq {
+		UserId   int64  `json:"userId"`
+		NiceName string `json:"nickname"`
+	}
+	UserUpdateResp {
+		Flag bool `json:"flag"`
+	}
+)
+
+@server(
+	group : user //file group
+	prefix: userapi/v1 //route group
+)
+
+service user-api{
+	@doc "get user info"
+	@handler userinfo
+	post /user/info (UserInfoReq) returns (UserInfoResp)
+	
+	@doc "update user info"
+	@handler userUpdate
+	post /user/update (UserUpdateReq) returns (UserUpdateResp)
+}
+
+goctl api go -api *.api -dir ../ --style=goZero
+
+#---------------------------------------#---------------------------------------#
+六 api服务之代码讲解
+#---------------------------------------#---------------------------------------#
+文件架构,使用 五 的api文件生成
+├── api
+│   └── user.api
+├── etc
+│   └── user-api.yaml
+├── internal
+│   ├── config
+│   │   └── config.go
+│   ├── handler
+│   │   ├── routes.go
+│   │   ├── user
+│   │   │   ├── userinfoHandler.go
+│   │   │   └── userUpdateHandler.go
+│   │   └── userinfoHandler.go
+│   ├── logic
+│   │   ├── user
+│   │   │   ├── userinfoLogic.go
+│   │   │   └── userUpdateLogic.go
+│   │   └── userinfoLogic.go
+│   ├── svc
+│   │   └── serviceContext.go
+│   └── types
+│       └── types.go
+└── user.go
+
+ctx := svc.NewServiceContext(c) #映射redis Kafka 等配置
+handler.RegisterHandlers(server, ctx) #注册路由
+
+#业务逻辑实现
+func (l *UserinfoLogic) Userinfo(req *types.UserInfoReq) (resp *types.UserInfoResp, err error) {
+	// todo: add your logic here and delete this line
+	m := map[int64]string{
+		1: "zhangsan",
+		2: "lisi",
+	}
+	nickName := "unknow"
+	if name, ok := m[req.UserId]; ok {
+		nickName = name
+	}
+
+	return &types.UserInfoResp{
+		UserId:   req.UserId,
+		NiceName: nickName,
+	}, nil
+}
+#发送 Post 请求
+curl -H "Content-Type: application/json" -X POST -d '{"userId": 1}' "http://127.0.0.1:8888/userapi/v1/user/info"
+curl -H "Content-Type: application/json" -X POST -d '{"userId": 2}' "http://127.0.0.1:8888/userapi/v1/user/info"
+curl -H "Content-Type: application/json" -X POST -d '{"userId": 3}' "http://127.0.0.1:8888/userapi/v1/user/info"
+
+#官方文档 -- api语法 查询
+如果修改成 Get 方法 form 传参 
+UserId int64 `form:"userId"`
+http://127.0.0.1:8888/userapi/v1/user/info?userId=1
+
+#---------------------------------------#---------------------------------------#
+七 api服务数据库操作
+#---------------------------------------#---------------------------------------#
+MySQL test数据库中的test表
+CREATE TABLE  if not exists  `test` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `userId` bigint DEFAULT 0,
+  `nickname` varchar(32) DEFAULT "",
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+insert into test (userId,nickname) values(1,"qqq");
+insert into test (userId,nickname) values(2,"www");
+
+指定数据库的表生成 #推荐 #也可以根据 sql语句生成
+在user-api 文件夹下新建一个model文件夹；执行下方语句
+goctl model mysql datasource -url="debian-sys-maint:exVcT6ajnKizd0P6@tcp(127.0.0.1:3306)/test" -table="test" -dir="./model"  --style=goZero #不带 cache 的
+#goctl model mysql datasource -url="debian-sys-maint:exVcT6ajnKizd0P6@tcp(127.0.0.1:3306)/test" -table="test" -dir="./model" --cache=true --style=goZero #带 cache 的
+
+1 config.go 文件
+type Config struct {
+	rest.RestConf
+	DB struct {
+		DataSource string
+	}
+}
+
+2 .yaml文件配置 (和上面的结构体映射)
+DB:
+  DataSource: debian-sys-maint:exVcT6ajnKizd0P6@tcp(127.0.0.1:3306)/test?charset=utf8mb4&parseTime=True&loc=Local
+
+3 ServiceContext 配置 ！！！
+type ServiceContext struct {
+	Config    config.Config
+	TestModel model.TestModel
+}
+
+func NewServiceContext(c config.Config) *ServiceContext {
+	return &ServiceContext{
+		Config:    c,
+		TestModel: model.NewTestModel(sqlx.NewMysql(c.DB.DataSource)),
+	}
+}
+
+4 核心逻辑实现
+	user, err := l.svcCtx.TestModel.FindOne(l.ctx, req.UserId)
+	if err != nil && err != model.ErrNotFound {
+		return nil, errors.New("get err def")
+	}
+	if user == nil {
+		return nil, errors.New("no user")
+	}
+
+	return &types.UserInfoResp{
+		UserId:   user.UserId,
+		NiceName: user.Nickname,
+	}, nil
+
+
+启动服务 && 调用 ！！！
+curl -H "Content-Type: application/json" -X POST -d '{"userId": 1}' "http://127.0.0.1:8888/userapi/v1/user/info"
+curl -H "Content-Type: application/json" -X POST -d '{"userId": 2}' "http://127.0.0.1:8888/userapi/v1/user/info"
+curl -H "Content-Type: application/json" -X POST -d '{"userId": 3}' "http://127.0.0.1:8888/userapi/v1/user/info"
+
+#---------------------------------------#---------------------------------------#
+八 gotctl<=1.3.3生成model一个小bug
+#---------------------------------------#---------------------------------------#
+没有唯一索引的时候 && --cache=true
+FindOne() 函数没有使用缓存
+先 FindOne() 再 Insert() 会导致先插入了一个 * 一分钟
+导致一分钟内查询到的还是 *
+
+
+
+cd /home/ubuntu/.goctl
+goctl template init #生成 1.3.3 模板
+
+/home/ubuntu/.goctl/1.3.3/model/insert.tpl
+#修改后的insert 模版如下
+func (m *default{{.upperStartCamelObject}}Model) Insert(ctx context.Context, data *{{.upperStartCamelObject}}) (sql.Result,error) {
+	{{if .withCache}}{{.keys}}
+    ret, err := m.ExecCtx(ctx, func(ctx context.Context, conn sqlx.SqlConn) (result sql.Result, err error) {
+		query := fmt.Sprintf("insert into %s (%s) values ({{.expression}})", m.table, {{.lowerStartCamelObject}}RowsExpectAutoSet)
+		return conn.ExecCtx(ctx, query, {{.expressionValues}})
+	}, {{.keyValues}}){{else}}query := fmt.Sprintf("insert into %s (%s) values ({{.expression}})", m.table, {{.lowerStartCamelObject}}RowsExpectAutoSet)
+    ret,err:=m.conn.ExecCtx(ctx, query, {{.expressionValues}}){{end}}
+	return ret,err
+}
+
+#在 zero-demo 目录下再次执行
+goctl model mysql datasource -url="debian-sys-maint:exVcT6ajnKizd0P6@tcp(127.0.0.1:3306)/test" -table="test" -dir="./model" --cache=true --style=goZero
+
+#原模板
+func (m *default{{.upperStartCamelObject}}Model) Insert(ctx context.Context, data *{{.upperStartCamelObject}}) (sql.Result,error) {
+        {{if .withCache}}{{if .containsIndexCache}}{{.keys}}
+    ret, err := m.ExecCtx(ctx, func(ctx context.Context, conn sqlx.SqlConn) (result sql.Result, err error) {
+                query := fmt.Sprintf("insert into %s (%s) values ({{.expression}})", m.table, {{.lowerStartCamelObject}}RowsExpectAutoSet)
+                return conn.ExecCtx(ctx, query, {{.expressionValues}})
+        }, {{.keyValues}}){{else}}query := fmt.Sprintf("insert into %s (%s) values ({{.expression}})", m.table, {{.lowerStartCamelObject}}RowsExpectAutoSet)
+    ret,err:=m.ExecNoCacheCtx(ctx, query, {{.expressionValues}})
+        {{end}}{{else}}query := fmt.Sprintf("insert into %s (%s) values ({{.expression}})", m.table, {{.lowerStartCamelObject}}RowsExpectAutoSet)
+    ret,err:=m.conn.ExecCtx(ctx, query, {{.expressionValues}}){{end}}
+        return ret,err
+}
+
+
+#---------------------------------------#---------------------------------------#
+九 sqlc执行源码分析与model详解
+#---------------------------------------#---------------------------------------#
+Redis:
+  Host: 127.0.0.1:6379
+  Type: node
+  Pass: 
+Cache:
+  - Host: 127.0.0.1:6379
+    Pass: 
+#两个对应封装方法不同,实现不同的操作
+
+
+
+#---------------------------------------#---------------------------------------#
+十 go-zero本地事务以及源码分析
+#---------------------------------------#---------------------------------------#
+CREATE TABLE  if not exists  `user` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `nickname` varchar(32) DEFAULT "",
+  `mobile` char(11) DEFAULT "",
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+CREATE TABLE  if not exists  `user_data` (
+  `id` int unsigned NOT NULL AUTO_INCREMENT,
+  `user_id` bigint DEFAULT 0,
+  `data` varchar(32) DEFAULT "",
+  create_time datetime DEFAULT now(),
+  update_time datetime DEFAULT now(),
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+
+ALTER TABLE `user_data` ADD UNIQUE (`user_id`); #添加唯一索引
+show index from user_data; #查看索引
+
+goctl model mysql datasource -url="debian-sys-maint:exVcT6ajnKizd0P6@tcp(127.0.0.1:3306)/test" -table="user_data"  -dir="./model" --cache=true --style=goZero #带 cache 的
+goctl model mysql datasource -url="debian-sys-maint:exVcT6ajnKizd0P6@tcp(127.0.0.1:3306)/test" -table="user"  -dir="./model" --cache=true --style=goZero
+
+1 添加
+DB:
+  DataSource: debian-sys-maint:exVcT6ajnKizd0P6@tcp(127.0.0.1:3306)/test?charset=utf8mb4&parseTime=True&loc=Local
+Cache:
+  - Host: 127.0.0.1:6379
+    Pass:
+
+2 添加
+type Config struct {
+	rest.RestConf
+	DB struct {
+		DataSource string
+	}
+	Cache cache.CacheConf
+}
+
+3 添加
+type ServiceContext struct {
+	Config        config.Config
+	UserModel      model.UserModel
+	UserDataModel model.UserDataModel
+}
+
+func NewServiceContext(c config.Config) *ServiceContext {
+	return &ServiceContext{
+		Config: c,
+		UserModel : model.NewUserModel(sqlx.NewMysql(c.DB.DataSource),c.Cache),
+		UserDataModel : model.NewUserDataModel(sqlx.NewMysql(c.DB.DataSource),c.Cache),
+	}
+}
+
+#---------------------------------------#
+user.api 文件
+syntax="v1"
+
+info (
+	author:"sss"
+	date:"2022.4.1"
+	desc:"api info"
+)
+
+type (
+	UserInfoReq {
+		UserId int64 `json:"userId"`
+	}
+	UserInfoResp {
+		UserId   int64  `json:"userId"`
+		NiceName string `json:"nickname"`
+	}
+)
+
+type (
+	UserUpdateReq {
+		UserId   int64  `json:"userId"`
+		NiceName string `json:"nickname"`
+	}
+	UserUpdateResp {
+		Flag bool `json:"flag"`
+	}
+)
+type (
+	UserCreateReq {
+		Mobile   string `json:"mobile"`
+		Nickname string `json:"nickname"`
+	}
+	UserCreateResp {
+		Flag bool `json:"flag"`
+	}
+)
+@server(
+	group : user //file group
+	prefix: userapi/v1 //route group
+)
+
+service user-api{
+	@doc "get user info"
+	@handler userinfo
+	post /user/info (UserInfoReq) returns (UserInfoResp)
+	
+	@doc "update user info"
+	@handler userUpdate
+	post /user/update (UserUpdateReq) returns (UserUpdateResp)
+	
+	@doc "add user info"
+	@handler userCreate
+	post /user/create (UserCreateReq) returns (UserCreateResp)
+}
+
+goctl api go -api *.api -dir ../ --style=goZero
+#---------------------------------------#
+userModel.go
+TransInsert(ctx context.Context, session sqlx.Session, data *User) (sql.Result, error)
+
+func (m *defaultUserModel) TransInsert(ctx context.Context, session sqlx.Session, data *User) (sql.Result, error) {
+	testUserIdKey := fmt.Sprintf("%s%v", cacheTestUserIdPrefix, data.Id)
+	ret, err := m.ExecCtx(ctx, func(ctx context.Context, conn sqlx.SqlConn) (result sql.Result, err error) {
+		query := fmt.Sprintf("insert into %s (%s) values (?, ?)", m.table, userRowsExpectAutoSet)
+		return session.ExecCtx(ctx, query, data.Nickname, data.Mobile)
+	}, testUserIdKey)
+	return ret, err
+}
+
+TransCtx(ctx context.Context, fn func(ctx context.Context, session sqlx.Session) error) error #interface
+
+//expose to logic to start Tx
+func (m *defaultUserModel) TransCtx(ctx context.Context, fn func(ctx context.Context, session sqlx.Session) error) error {
+	return m.TransactCtx(ctx, func(ctx context.Context, s sqlx.Session) error {
+		return fn(ctx, s)
+	})
+}
+
+userDataModel.go
+TransInsert(ctx context.Context, session sqlx.Session, data *UserData) (sql.Result, error)
+
+func (m *defaultUserDataModel) TransInsert(ctx context.Context, session sqlx.Session, data *UserData) (sql.Result, error) {
+	testUserDataUserIdKey := fmt.Sprintf("%s%v", cacheTestUserDataUserIdPrefix, data.UserId)
+	testUserDataIdKey := fmt.Sprintf("%s%v", cacheTestUserDataIdPrefix, data.Id)
+	ret, err := m.ExecCtx(ctx, func(ctx context.Context, conn sqlx.SqlConn) (result sql.Result, err error) {
+		query := fmt.Sprintf("insert into %s (%s) values (?, ?)", m.table, userDataRowsExpectAutoSet)
+		return session.ExecCtx(ctx, query, data.UserId, data.Data)
+	}, testUserDataIdKey, testUserDataUserIdKey)
+	return ret, err
+}
+
+
+
+userCreateLogic.go
+func (l *UserCreateLogic) UserCreate(req *types.UserCreateReq) (resp *types.UserCreateResp, err error) {
+	// todo: add your logic here and delete this line
+
+	if err := l.svcCtx.UserModel.TransCtx(l.ctx, func(ctx context.Context, session sqlx.Session) error {
+		user := &model.User{
+			Mobile:   req.Mobile,
+			Nickname: req.Nickname,
+		}
+		dbResult, err := l.svcCtx.UserModel.TransInsert(ctx, session, user)
+		if err != nil {
+			return err
+		}
+		userId, _ := dbResult.LastInsertId()
+		userData := &model.UserData{
+			UserId: userId,
+			Data:   "xxxx",
+		}
+		if _, err := l.svcCtx.UserDataModel.TransInsert(ctx, session, userData); err != nil {
+			return err
+		}
+
+		return nil
+	}); err != nil {
+		return nil, errors.New("create user fail")
+	}
+
+	return &types.UserCreateResp{
+		Flag: true,
+	}, nil
+}
+
+运行 && 调试 ！！！
+curl -H "Content-Type: application/json" -X POST -d '{"mobile":"18888888888","nickname":"赵六"}' "http://127.0.0.1:8888/userapi/v1/user/create"
+
+提交return 返回失败再次执行 
+curl -H "Content-Type: application/json" -X POST -d '{"mobile":"18888888888","nickname":"赵六"}' "http://127.0.0.1:8888/userapi/v1/user/create"
+事物回滚
+
+#---------------------------------------#---------------------------------------#
+十一 api服务之middleware
+#---------------------------------------#---------------------------------------#
+#针对文件以下的路由 (局部中间件)
+@server(
+	group : user //file group
+	prefix: userapi/v1 //route group
+	middleware : TestMiddleware
+)
+
+TestMiddleware rest.Middleware
+
+TestMiddleware: middleware.NewTestMiddleware().Handle,
+
+		// TODO generate middleware implement function, delete after code implementation
+		fmt.Println("this is middleware begin")
+		// Passthrough to next handler if need
+		next(w, r)
+		fmt.Println("this is middleware end")
+
+#访问 查看中间件是否生效
+curl -H "Content-Type: application/json" -X POST -d '{"mobile":"18888888888","nickname":"赵六"}' "http://127.0.0.1:8888/userapi/v1/user/create"
+
+全局中间件 通常在 main() 函数中添加
+server.Use(middleware.NewGlobal().Handle) #书写方式
+
+#---------------------------------------#---------------------------------------#
+十二 go-zero的Log
+#---------------------------------------#---------------------------------------#
+Log:
+  ServiceName: user-api
+  Mode: file
+  Path: logs
+  Level: info
+  Encoding: plain
+  Compress: true
+  KeepDays: 7
+
+logx.Info("test user log info")
+
+curl -H "Content-Type: application/json" -X POST -d '{"userId":1}' "http://127.0.0.1:8888/userapi/v1/user/info"
+
+
+#---------------------------------------#---------------------------------------#
+十三 go-zero单体项目及配置如何查看
+#---------------------------------------#---------------------------------------#
+Timeout配置
+1 api请求超时时间 
+2 rpc 的 server 超时
+3 rpc 的 client 超时
+
+
+#---------------------------------------#---------------------------------------#
+十四 go-zero的api整体源码分析
+#---------------------------------------#---------------------------------------#
+重点:
+1 配置
+2 绑定路由
+3 中间件
+	日志
+	监控
+	链路追踪
+	MetricsUrl
+
+#---------------------------------------#---------------------------------------#
+十五 go-zero的rpc服务简单介绍
+#---------------------------------------#---------------------------------------#
+syntax = "proto3";
+
+option go_package= "./pb";
+
+package pb;
+
+message GetUserInfoReq {
+    int64 id = 1;
+}
+
+message GetUserInfoResp {
+    int64 id = 1;
+	string nickname = 2;
+}
+
+service usercenter {
+    rpc GetUserInfo(GetUserInfoReq) returns(GetUserInfoResp);
+}
+
+goctl rpc protoc *.proto --go_out=../ --go-grpc_out=../ --zrpc_out=../ --style=goZero
+
+
+
+#---------------------------------------#---------------------------------------#
+十六 rpc服务如何独立调试
+#---------------------------------------#---------------------------------------#
+go install github.com/fullstorydev/grpcui/cmd/grpcui@latest
+
+grpcui -plaintext localhost:9080
+
+.yaml文件配置设置
+Mode: dev
+
+
+#---------------------------------------#---------------------------------------#
+十七 api如何调用rpc
+#---------------------------------------#---------------------------------------#
+api配置etcd相关配置
+1 .yaml (rpc之间相互调用也需要配置etcd)
+UserRpcConf:
+  Etcd:
+    Hosts:
+    - 127.0.0.1:2379
+    Key: user.rpc
+
+2 config.go
+UserRpcConf zrpc.RpcClientConf
+
+3 serviceContext.go
+func NewServiceContext(c config.Config) *ServiceContext {
+	return &ServiceContext{
+		Config:         c,
+		UserModel:      model.NewUserModel(sqlx.NewMysql(c.DB.DataSource), c.Cache),
+		UserDataModel:  model.NewUserDataModel(sqlx.NewMysql(c.DB.DataSource), c.Cache),
+		TestMiddleware: middleware.NewTestMiddleware().Handle,
+		UserRpc:        usercenter.NewUsercenter(zrpc.MustNewClient(c.UserRpcConf)),
+	}
+}
+
+4 userinfoLogic.go
+func (l *UserinfoLogic) Userinfo(req *types.UserInfoReq) (resp *types.UserInfoResp, err error) {
+	// todo: add your logic here and delete this line
+	logx.Info("test user log info")
+
+	userResp, err := l.svcCtx.UserRpc.GetUserInfo(l.ctx, &pb.GetUserInfoReq{
+		Id: req.UserId,
+	})
+	if err != nil {
+		return nil, errors.New("rpc error")
+	}
+	return &types.UserInfoResp{
+		UserId:   userResp.Id,
+		NiceName: userResp.Nickname,
+	}, nil
+}
+
+5 调用测试 (先启动rpc,再启动api)
+curl -H "Content-Type: application/json" -X POST -d '{"userId":1}' "http://127.0.0.1:8888/userapi/v1/user/info"
+
+
+#---------------------------------------#---------------------------------------#
+十八 go-zero中写protobuf注意点
+#---------------------------------------#---------------------------------------#
+import包的时候
+被引入的包与主包在同一文件夹下,要分开编译
+被引入包使用protoc编译
+	protoc -I ./ --go_out=paths=source_relative:. --go-grpc_out=paths=source_relative:.  XXX.proto
+goctl指定具体文件名称
+	goctl rpc protoc XXX.proto --go_out=../ --go-grpc_out=../ --zrpc_out=../ --style=goZero
+
+
+#---------------------------------------#---------------------------------------#
+十九 sql2pb告别手写pb的烦恼
+#---------------------------------------#---------------------------------------#
+etcd作为注册中心
+需要在api yaml中也配置,并且在 service 中配置
+
+
+
+#---------------------------------------#---------------------------------------#
+sql2pb告别手写pb的烦恼
+#---------------------------------------#---------------------------------------#
+github地址:
+https://github.com/Mikaelemmmm/sql2pb
+
+
+
+
+#---------------------------------------#---------------------------------------#
+二十 rpc中如何使用model
+#---------------------------------------#---------------------------------------#
+rpc文件
+1 .yaml文件
+DB:
+  DataSource: debian-sys-maint:exVcT6ajnKizd0P6@tcp(127.0.0.1:3306)/test?charset=utf8mb4&parseTime=True&loc=Local
+Cache:
+  - Host: 127.0.0.1:6379
+    Pass:
+
+2 config.go
+type Config struct {
+	zrpc.RpcServerConf
+	DB struct {
+		DataSource string
+	}
+	Cache cache.CacheConf
+}
+
+3 serviceContext.go
+type ServiceContext struct {
+	Config        config.Config
+	UserModel     model.UserModel
+	UserDataModel model.UserDataModel
+}
+
+func NewServiceContext(c config.Config) *ServiceContext {
+	return &ServiceContext{
+		Config:        c,
+		UserModel:     model.NewUserModel(sqlx.NewMysql(c.DB.DataSource), c.Cache),
+		UserDataModel: model.NewUserDataModel(sqlx.NewMysql(c.DB.DataSource), c.Cache),
+	}
+}
+
+4 拷贝 model 文件到 rpc文件夹
+
+5 logic/getUserInfoLogic.go
+func (l *GetUserInfoLogic) GetUserInfo(in *pb.GetUserInfoReq) (*pb.GetUserInfoResp, error) {
+	// todo: add your logic here and delete this line
+
+	// m := map[int]string{
+	// 	1: "zhang san from rpc",
+	// 	2: "li si from rpc",
+	// }
+	// nickname := "unknow"
+	// if name, ok := m[int(in.Id)]; ok {
+	// 	nickname = name
+	// }
+	user, err := l.svcCtx.UserDataModel.FindOne(l.ctx, in.Id)
+	if err != nil {
+		return nil, errors.New("find one err")
+	}
+	return &pb.GetUserInfoResp{
+		Id:       user.Id,
+		Nickname: user.Data,
+	}, nil
+}
+
+6 grpcui && 调试
+
+#---------------------------------------#---------------------------------------#
+#---------------------------------------#---------------------------------------#
+二十一 api与rpc通过etcd服务发现
+#---------------------------------------#---------------------------------------#
+#---------------------------------------#---------------------------------------#
+etcd (默认方式)
+见之前api 调用 rpc
+
+#---------------------------------------#---------------------------------------#
+二十二 api与rpc直连方式服务发现
+#---------------------------------------#---------------------------------------#
+适合机器量少
+RpcClientConf struct {
+	Etcd      discov.EtcdConf `json:",optional"`
+	Endpoints []string        `json:",optional"`
+	Target    string          `json:",optional"`
+	App       string          `json:",optional"`
+	Token     string          `json:",optional"`
+	NonBlock  bool            `json:",optional"`
+	Timeout   int64           `json:",default=2000"`
+}
+
+选择设置 Endpoints 字段 再config.go
+UserRpcConf:
+  Endpoints:
+    - 192.168.10.55:2379
+	- 192.168.10.56:2379
+
+
+#---------------------------------------#---------------------------------------#
+二十三 api与rpc使用k8s服务发现及部署
+#---------------------------------------#---------------------------------------#
+#使用k8s 的时候不要使用直连,负载会出问题
+1 写代码
+
+2 再api 配置rpc发发现
+.yaml文件配置要使用 Target,不能使用 Endpoints
+BasicRpcConf:
+  Target: k8s://{namespace}/{k8s service name}:{Port}
+
+{rpc段的new}       basic.Basic
+BasicRpc: basic.NewBasic(zrpc.NewClient(c.BasicRpcConf)),
+
+3 使用goctl 生成rpc、api的Dockerfile 
+
+4 生成 rpc、api 的镜像,同时推送到镜像仓库
+
+5 创建serviceAccount 要具有k8s内部的endpoints资源的list、watch、get权限
+
+6 使用goctl 生成rpc、api的yaml部署文件,并且指定第5步创建好的serviceAccount
+
+7 部署
+
+8 访问 && 测试
+
+
+
+#---------------------------------------#
+生成代码
+goctl api go -api *.api -dir ../ --style=goZero
+
+goctl rpc protoc *.proto --go_out=../ --go-grpc_out=../ --zrpc_out=../ --style=goZero 
+
+#---------------------------------------#
+**** **** **** api **** **** ****
+K8SConf:
+  Target: k8s://default/user-rpc-svc:9000
+
+K8SConf zrpc.RpcClientConf
+
+
+goctl docker -go api.go
+Dockerfile 拷贝到项目的根目录下执行
+docker build -t user-api:v1 .
+
+**** **** **** rpc **** **** ****
+	name, err := os.Hostname()
+	if err != nil {
+		return nil, errors.New("get hostname err")
+	}
+
+	return &pb.RespInfo{
+		Hostname: name + "==============>",
+	}, nil
+
+
+goctl docker -go info.go
+Dockerfile 拷贝到项目的根目录下执行
+docker build -t user-rpc:v1 .
+
+#---------------------------------------#
+kubectl apply -f auth.yaml
+#创建账号
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  namespace: default
+  name: find-endpoints
+
+---
+#创建角色对应操作
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: discov-endpoints
+rules:
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get","list","watch"]
+
+---
+#给账号绑定角色
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: find-endpoints-discov-endpoints
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: discov-endpoints
+subjects:
+- kind: ServiceAccount
+  name: find-endpoints
+  namespace: default
+#---------------------------------------#
+生成 yaml文件
+api:
+goctl kube deploy -nodePort 32010 -replicas 3 -requestCpu 200 -requestMem 50 -limitMem 100 -name user-api -namespace default -image user-api:v1 -o user-api.yaml -port 8888 --serviceAccount find-endpoints 
+docker build -t user-api:v1 .
+
+rpc:
+goctl kube deploy -replicas 3 -requestCpu 200 -requestMem 50 -limitMem 100 -name user-rpc -namespace default -image user-rpc:v1 -o user-rpc.yaml -port 9000 --serviceAccount find-endpoints 
+docker build -t user-rpc:v1 .
+
+
+#---------------------------------------#
+docker save -o api.tgz user-api:v1
+docker save -o rpc.tgz user-rpc:v1
+
+docker load -i api.tgz
+docker load -i rpc.tgz
+
+#---------------------------------------#
+部署生成的yaml文件
+
+访问
+curl 127.0.0.1:32010/info?id=1 
+
+#---------------------------------------#---------------------------------------#
+二十四 rpc的服务端拦截器
+#---------------------------------------#---------------------------------------#
+1 rpc 的 main 函数中添加
+$ defer s.Stop()
+	s.AddUnaryInterceptors(TestInterceptors)
+$ fmt.Printf("Starting rpc server at %s...\n", c.ListenOn)
+$ s.Start()
+
+2 拦截器函数
+func TestInterceptors(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+	fmt.Printf("TestInterceptors ======> start \n")
+	fmt.Printf("TestInterceptors ======> %v \n", req)
+	fmt.Printf("TestInterceptors ======> %v \n", info)
+	resp, err = handler(ctx, req) //函数前后执行顺序
+
+	fmt.Printf("TestInterceptors ======> end \n")
+	return resp, err
+}
+
+3 执行顺序
+func (l *GetUserInfoLogic) GetUserInfo(in *pb.GetUserInfoReq) (*pb.GetUserInfoResp, error) {
+	fmt.Println("come into GetUserInfo function") }
+
+3 调用
+curl -H "Content-Type: application/json" -X POST -d '{"userId":1}' "http://127.0.0.1:8888/userapi/v1/user/info"
+curl -H "Content-Type: application/json" -X POST -d '{"userId":3}' "http://127.0.0.1:8888/userapi/v1/user/info"
+$ TestInterceptors ======> start 
+$ TestInterceptors ======> id:3 
+$ TestInterceptors ======> &{0xc000230880 /pb.usercenter/GetUserInfo} 
+$ come into GetUserInfo function
+$ TestInterceptors ======> end 
+
+
+#---------------------------------------#---------------------------------------#
+二十五、rpc的客户端拦截器
+#---------------------------------------#---------------------------------------#
+1 zero-demo/user-api/internal/svc 添加 拦截器
+func NewServiceContext(c config.Config) *ServiceContext {
+	return &ServiceContext{
+		Config:         c,
+		UserRpc:        usercenter.NewUsercenter(zrpc.MustNewClient(c.UserRpcConf, zrpc.WithUnaryClientInterceptor(Interceptor))),
+	}
+}
+
+func Interceptor(ctx context.Context, method string, req, replay interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	fmt.Println("before invoker...")
+	err := invoker(ctx, method, req, replay, cc, opts...)
+	if err != nil {
+		return err
+	}
+	fmt.Println("after invoker...")
+	return nil
+}
+
+2 userinfoLogic.go
+func (l *UserinfoLogic) Userinfo(req *types.UserInfoReq) (resp *types.UserInfoResp, err error) {
+	// todo: add your logic here and delete this line
+	fmt.Println("api Userinfo function...") }
+
+3 调用
+curl -H "Content-Type: application/json" -X POST -d '{"userId":1}' "http://127.0.0.1:8888/userapi/v1/user/info"
+$ api Userinfo function...
+$ before invoker...  //rpc调用前执行
+$ after invoker...   //rpc调用后执行
+
+注意:如果rpc和api的logic都有查询逻辑,开启服务后还是调用rpc的
+
+#---------------------------------------#---------------------------------------#
+#---------------------------------------#---------------------------------------#
+二十六 不同服务之间通过metadata传值 ！！！ (拦截器中实现)
+#---------------------------------------#---------------------------------------#
+#---------------------------------------#---------------------------------------#
+1 zero-demo/user-api/internal/svc/serviceContext.go
+func Interceptor(ctx context.Context, method string, req, replay interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	fmt.Println("before invoker...")
+	md := metadata.New(map[string]string{"username": "zzzzzhang san..."})
+	ctx = metadata.NewOutgoingContext(ctx, md)
+
+	err := invoker(ctx, method, req, replay, cc, opts...)
+	if err != nil {
+		return err
+	}
+	fmt.Println("after invoker...")
+	return nil
+}
+
+2 zero-demo/user-rpc/internal/logic/getUserInfoLogic.go
+func (l *GetUserInfoLogic) GetUserInfo(in *pb.GetUserInfoReq) (*pb.GetUserInfoResp, error) {
+	if res, ok := metadata.FromIncomingContext(l.ctx); ok {
+		tmp := res.Get("username")
+		fmt.Printf("tmp: %v\n", tmp)
+	}
+}
+
+3 调用
+curl -H "Content-Type: application/json" -X POST -d '{"userId":1}' "http://127.0.0.1:8888/userapi/v1/user/info"
+
+
+#---------------------------------------#---------------------------------------#

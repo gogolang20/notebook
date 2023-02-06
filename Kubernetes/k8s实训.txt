@@ -1,0 +1,95 @@
+
+k set image  deploy/{name} {imagename}={newimagename}
+
+k create service clusterip my-svc-cp --tcp=80:8080
+curl 10.96.12.234:80
+k get endpoints -o wide
+k describe svc my-svc-cp
+
+k create service nodeport my-svc-np --tcp=1234:80
+k describe service my-svc-np
+
+k create service clusterip my-svc-headless --clusterip="None"
+k describe svc my-svc-headless
+k describe svc my-svc-cp
+
+
+k create deploy hello-nginx --image=nginx
+k get po
+k expose deploy hello-nginx --type=ClusterIP --name=my-nginx  --port=8090 --target-port=80
+k get svc
+curl 10.96.13.218:8090
+curl 10.244.1.39:80 #endpoints
+
+#通过 DNS 解析
+busybox.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: busybox
+  namespace: default
+spec: 
+  containers:
+  - name: busybox
+    image: busybox:1.28
+    command:
+      - sleep
+      - "3600"
+    imagePullPolicy: IfNotPresent
+  restartPolicy: Always
+
+k exec -it busybox -- sh
+nslookup kubernetes.default
+k exec -it busybox -- nslookup kubernetes.default
+k exec -it busybox -- nslookup my-nginx
+
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: my-ingress
+spec:
+  rules:
+  - host: 10.96.13.218
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: my-nginx
+          servicePort: 8090
+
+
+
+四种鉴权方式
+1 RBAC (常用)
+2 ABAC
+3 Node
+4 Webhook 
+
+演示
+1 创建 sa
+2 创建对应的 ns
+3 创建 role
+4 创建 rolebinding
+5 创建容器
+
+PodsecurityPolicy
+特权容器
+
+
+
+
+k create service my-svc-cp --tcp=80:8080
+k create service clusterip my-svc-cp --tcp=80:8080
+curl 10.96.12.234:80
+k get endpoints -o wide
+kubectl create service --help
+k describe service my-svc-cp
+k create service nodeport my-svc-np --tcp=1234:80
+k describe service my-svc-np
+k create service clusterip my-svc-headless --clusterip="None"
+k describe svc my-svc-headless
+k describe svc my-svc-cp
+k create deploy hello-nginx --image=nginx
+
+k expose deploy hello-nginx --type=ClusterIP --name=my-nginx  --port=8090 --target-port=80
+curl 10.96.13.218:8090

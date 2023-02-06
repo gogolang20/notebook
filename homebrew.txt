@@ -1,0 +1,19 @@
+https://zhuanlan.zhihu.com/p/111014448
+
+/bin/zsh -c "$(curl -fsSL https://gitee.com/cunkai/HomebrewCN/raw/master/Homebrew.sh)"
+source 1、2、3
+
+brew -v
+git config --global --add safe.directory /opt/homebrew/Library/Taps/homebrew/homebrew-core
+git config --global --add safe.directory /opt/homebrew/Library/Taps/homebrew/homebrew-cask
+
+export HOMEBREW_NO_INSTALL_CLEANUP=TRUE
+
+
+
+github key:
+machine github.com/gogolang20
+login gogolang20
+password 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
+
+git clone https://oauth2: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@github.com/gogolang20/golang-algorithm.git

@@ -1,0 +1,419 @@
+#---------------------------------------#---------------------------------------#
+kubectl - create的调用逻辑
+#---------------------------------------#---------------------------------------#
+代码位置:kubernetes/cmd/kubectl/kubectl.go
+// 开始的地方
+func NewDefaultKubectlCommand() *cobra.Command
+
+// NewKubectlCommand creates the `kubectl` command and its nested children.
+func NewKubectlCommand(o KubectlOptions) *cobra.Command
+
+#进入 create 的命令中
+groups := templates.CommandGroups --> func NewCmdCreate(f cmdutil.Factory, ioStreams genericclioptions.IOStreams) *cobra.Command
+调用 Run: func(cmd *cobra.Command, args []string)
+
+#RunCreate
+cmdutil.CheckErr(o.RunCreate(f, cmd)) --> func (o *CreateOptions) RunCreate(f cmdutil.Factory, cmd *cobra.Command) error 
+
+#解析文件
+FilenameParam(enforceNamespace, &o.FilenameOptions). -- > func (b *Builder) FilenameParam(enforceNamespace bool, filenameOptions *FilenameOptions) *Builder
+
+
+#---------------------------------------#---------------------------------------#
+kubectl - 设计模式中Visitor的实现
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-003/
+
+// Visitor lets clients walk a list of resources.
+type Visitor interface {
+	Visit(VisitorFunc) error
+}
+type VisitorFunc func(*Info, error) error
+问题一
+ 单个操作 可以直接调用 Visitor 方法,多个操作 如何实现？
+问题二
+ 在应用 多个操作 时,如果出现了error,该退出还是继续应用 下一个操作 呢？
+
+
+
+#调用链
+type VisitorList []Visitor 
+
+#error集中返回
+type EagerVisitorList []Visitor
+
+type URLVisitor struct {
+	URL *url.URL
+	*StreamVisitor
+	HttpAttemptCount int
+}
+
+type DecoratedVisitor struct {
+	visitor    Visitor
+	decorators []VisitorFunc
+}
+
+type ContinueOnErrorVisitor struct {
+	Visitor
+}
+
+
+type FlattenListVisitor struct {
+	visitor Visitor
+	typer   runtime.ObjectTyper
+	mapper  *mapper
+}
+
+
+type FileVisitor struct {
+	Path string
+	*StreamVisitor
+}
+
+
+
+type StreamVisitor struct {
+	io.Reader
+	*mapper
+
+	Source string
+	Schema ContentValidator
+}
+
+
+type FilteredVisitor struct {
+	visitor Visitor
+	filters []FilterFunc
+}
+
+type InfoListVisitor []*Info
+
+#---------------------------------------#---------------------------------------#
+kubectl - 发送创建Pod请求的实现细节
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-004/
+
+1 向kube-apiserver发送请求
+2 RESTful客户端是怎么创建的
+3 Object是怎么生成的
+4 发送post请求
+5 kubectl第一阶段源码阅读总结
+
+#包含核心 函数
+func (o *CreateOptions) RunCreate(f cmdutil.Factory, cmd *cobra.Command) error
+
+#起始位置
+func (o *CreateOptions) RunCreate(f cmdutil.Factory, cmd *cobra.Command) error
+--> Create(info.Namespace, true, info.Object) --> func (m *Helper) Create(namespace string, modify bool, obj runtime.Object) (runtime.Object, error)
+...--> func (m *Helper) createResource(c RESTClient, resource, namespace string, obj runtime.Object, options *metav1.CreateOptions)
+
+NewHelper(info.Client, info.Mapping). --> func NewHelper(client RESTClient, mapping *meta.RESTMapping) *Helper 
+
+#打开文件
+type FileVisitor struct {
+	Path string
+	*StreamVisitor
+}
+
+func (v *FileVisitor) Visit(fn VisitorFunc) error --> func (v *StreamVisitor) Visit(fn VisitorFunc) error
+--> info, err := v.infoForData(ext.Raw, v.Source) --> func (m *mapper) infoForData(data []byte, source string) (*Info, error)
+
+Unstructured(). --> func (b *Builder) Unstructured() *Builder --> decoder:      &metadataValidatingDecoder{unstructured.UnstructuredJSONScheme},
+
+func (r Result) Get() (runtime.Object, error)
+
+#---------------------------------------#---------------------------------------#
+kube-apiserver 权限相关的三个核心概念
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-005/
+
+理解启动kube-apiserver的权限相关的三个核心概念 Authentication/Authorization/Admission
+1 kube-apiserver的启动
+2 kube-apiserver的三个Server
+	createAPIExtensionsServer #API扩展服务,主要针对CRD
+	CreateKubeAPIServer #API核心服务,包括常见的Pod/Deployment/Service
+	createAggregatorServer #API聚合服务,主要针对metrics
+3 KubeAPIServer的创建过程
+	通用配置概况
+	通用配置中的 认证 Authentication
+	通用配置中的 授权 Authorization
+	通用配置中的 准入机制 Admission
+
+kubernetes/cmd/kube-apiserver/apiserver.go
+command := app.NewAPIServerCommand() --> func NewAPIServerCommand() *cobra.Command --> return Run(completedOptions, genericapiserver.SetupSignalHandler())
+--> func Run(completeOptions completedServerRunOptions, stopCh <-chan struct{}) error
+--> server, err := CreateServerChain(completeOptions, stopCh) --> func CreateServerChain(completedOptions completedServerRunOptions, stopCh <-chan struct{}) (*aggregatorapiserver.APIAggregator, error)
+
+#CreateServerChain 函数内三个server
+apiExtensionsServer, err := createAPIExtensionsServer
+kubeAPIServer, err := CreateKubeAPIServer
+aggregatorServer, err := createAggregatorServer
+
+
+kubeAPIServerConfig, serviceResolver, pluginInitializer, err := CreateKubeAPIServerConfig(completedOptions)
+--> func CreateKubeAPIServerConfig(s completedServerRunOptions) --> genericConfig, versionedInformers, serviceResolver, pluginInitializers, admissionPostStartHook, storageFactory, err := buildGenericConfig(s.ServerRunOptions, proxyTransport)
+
+config := &controlplane.Config #apiserver中的核心server
+
+func buildGenericConfig 
+if lastErr = s.Authentication.ApplyTo --> func (o *BuiltInAuthenticationOptions) ApplyTo(authInfo *genericapiserver.AuthenticationInfo,
+genericConfig.Authorization.Authorizer, genericConfig.RuleResolver, err = BuildAuthorizer --> func BuildAuthorizer(s *options.ServerRunOptions, EgressSelector *egressselector.EgressSelector,
+err = s.Admission.ApplyTo --> func (a *AdmissionOptions) ApplyTo
+
+
+
+#---------------------------------------#---------------------------------------#
+kube-apiserver - GenericAPIServer的初始化
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-006/
+
+
+1 genericServer的创建
+2 创建REST的Handler
+3 Generic的API路由规则
+4 初始化核心Apiserver
+5 核心资源的API路由规则
+6 创建Pod的函数
+
+func CreateKubeAPIServer(kubeAPIServerConfig *controlplane.Config, delegateAPIServer genericapiserver.DelegationTarget)
+--> func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget) (*Instance, error)
+--> kubeAPIServer, err := kubeAPIServerConfig.Complete().New(delegateAPIServer) --> func (c completedConfig) New(delegationTarget genericapiserver.DelegationTarget) (*Instance, error)
+--> s, err := c.GenericConfig.New("kube-apiserver", delegationTarget) --> func (c completedConfig) New(name string, delegationTarget DelegationTarget) (*GenericAPIServer, error)
+
+apiServerHandler := NewAPIServerHandler(name, c.Serializer, handlerChainBuilder, delegationTarget.UnprotectedHandler())
+installAPI(s, c.Config) --> func installAPI(s *GenericAPIServer, c *Config) 
+
+
+func (m *Instance) InstallLegacyAPI(c *completedConfig, restOptionsGetter generic.RESTOptionsGetter, --> legacyRESTStorage, apiGroupInfo, err := legacyRESTStorageProvider.NewLegacyRESTStorage(restOptionsGetter)
+
+func (m *Instance) InstallAPIs(apiResourceConfigSource serverstorage.APIResourceConfigSource,
+
+func NewStorage(optsGetter generic.RESTOptionsGetter, k client.ConnectionInfoGetter, proxyTransport http.RoundTripper,
+CreateStrategy:      registrypod.Strategy,
+UpdateStrategy:      registrypod.Strategy,
+DeleteStrategy:      registrypod.Strategy,
+
+var Strategy = podStrategy{legacyscheme.Scheme, names.SimpleNameGenerator}
+Scheme = runtime.NewScheme()
+
+#---------------------------------------#---------------------------------------#
+kube-apiserver - Pod数据的保存
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-007/
+
+1 RESTCreateStrategy创建的预处理
+2 REST Pod数据的存储
+3 存储的底层实现
+4 kube-apiserver第一阶段源码阅读总结
+
+func NewStorage(optsGetter generic.RESTOptionsGetter, k client.ConnectionInfoGetter, proxyTransport http.RoundTripper,
+
+#实例化store
+if err := store.CompleteWithOptions(options); --> func (e *Store) CompleteWithOptions(options *generic.StoreOptions) error --> if e.Storage.Storage == nil
+
+e.Storage.Storage, e.DestroyFunc, err = opts.Decorator --> 
+
+func NewRawStorage(config *storagebackend.ConfigForResource, newFunc func() runtime.Object) --> func Create(c storagebackend.ConfigForResource, newFunc func() runtime.Object) (storage.Interface, DestroyFunc, error) 
+
+
+#---------------------------------------#---------------------------------------#
+kube-scheduler - 初探调度的启动流程与算法
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-008/
+
+kubernetes/cmd/kube-scheduler/scheduler.go
+
+1 kube-scheduler的启动
+2 Scheduler的注册
+3 了解一个最简单的算法NodeName
+
+command := app.NewSchedulerCommand() --> func NewSchedulerCommand(registryOptions ...Option) *cobra.Command
+--> return runCommand(cmd, opts, registryOptions...) --> func runCommand(cmd *cobra.Command, opts *options.Options, registryOptions ...Option) error 
+
+cc, sched, err := Setup(ctx, opts, registryOptions...) --> func Setup(ctx context.Context, opts *options.Options, outOfTreeRegistryOptions ...Option)
+
+return Run(ctx, cc, sched) --> func Run(ctx context.Context, cc *schedulerserverconfig.CompletedConfig, sched *scheduler.Scheduler) error 
+--> if cz, err := configz.New("componentconfig"); err == nil {
+
+cc.InformerFactory.Start(ctx.Done())
+
+sched, err := scheduler.New(cc.Client, --> func New(client clientset.Interface,
+
+registry := frameworkplugins.NewInTreeRegistry() --> func NewInTreeRegistry() runtime.Registry --> nodename.Name: 
+
+
+
+#---------------------------------------#---------------------------------------#
+kube-scheduler - Informer监听资源变化
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-009/
+
+1 什么是Informer
+2 Shared Informer的实现
+3 PodInformer的背后的实现
+4 聚焦Reflect结构
+5 本节小节
+
+Informer的核心功能是 获取并监听(ListAndWatch)对应资源的增删改,触发相应的事件操作(ResourceEventHandler)
+
+return Run(ctx, cc, sched) --> func Run(ctx context.Context, cc *schedulerserverconfig.CompletedConfig, sched *scheduler.Scheduler) error
+--> cc.InformerFactory.Start(ctx.Done())
+
+func (o *Options) Config() (*schedulerappconfig.Config, error) --> c.InformerFactory = scheduler.NewInformerFactory(client, 0)
+
+func (f *sharedInformerFactory) Start(stopCh <-chan struct{})
+
+func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) --> s.controller.Run(stopCh) --> func (c *controller) Run(stopCh <-chan struct{})
+r := NewReflector( --> func (r *Reflector) Run(stopCh <-chan struct{}) --> 
+
+func (r *Reflector) watchHandler(start time.Time, w watch.Interface, resourceVersion *string, errc chan error,
+
+
+
+1 Informer 依赖于 Reflector 模块,它有个组件为 xxxInformer,如 podInformer
+2 具体资源的 Informer 包含了一个连接到kube-apiserver的client,通过List和Watch接口查询资源变更情况
+3 检测到资源发生变化后,通过Controller 将数据放入队列DeltaFIFOQueue里,生产阶段完成
+
+#---------------------------------------#---------------------------------------#
+kube-scheduler - Informer是如何保存数据的
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-010/
+
+1 查看消费的过程
+2 掌握Index数据结构
+3 信息的分发distribute
+4 Informer的综合思考
+
+func (c *controller) Run(stopCh <-chan struct{}) --> wait.Until(c.processLoop, time.Second, stopCh) --> func (c *controller) processLoop()
+
+func (f *FIFO) Pop(process PopProcessFunc) (interface{}, error) 
+
+func (s *sharedIndexInformer) Run(stopCh <-chan struct{}) --> Process: s.HandleDeltas, --> func (s *sharedIndexInformer) HandleDeltas(obj interface{}) error
+
+
+#---------------------------------------#---------------------------------------#
+kube-scheduler - 了解分配pod的大致流程
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-011/
+
+1 分析Scheduler的结构体
+2 往SchedulingQueue里
+3 调度一个pod对象
+	调度计算结果 - ScheduleResult
+	初步推算 - Assume
+	实际绑定 - Bind
+4 将绑定成功后的数据更新到etcd
+5 pod绑定Node的总结
+
+func runCommand(cmd *cobra.Command, opts *options.Options, registryOptions ...Option) error
+
+type Scheduler struct {Algorithm ScheduleAlgorithm }
+
+sched, err := scheduler.New(cc.Client, --> sched, err := configurator.create() --> func (c *Configurator) create() (*Scheduler, error)
+--> return &Scheduler{ NextPod:         internalqueue.MakeNextPodFunc(podQueue),SchedulingQueue: podQueue,}
+
+func (sched *Scheduler) Run(ctx context.Context) --> wait.UntilWithContext(ctx, sched.scheduleOne, 0) --> func (sched *Scheduler) scheduleOne(ctx context.Context)
+--> fwk, err := sched.frameworkForPod(pod)
+
+#1
+scheduleResult, err := sched.Algorithm.Schedule(schedulingCycleCtx, sched.Extenders, fwk, state, pod) 
+--> func (g *genericScheduler) Schedule(ctx context.Context, extenders []framework.Extender, fwk framework.Framework,
+#2
+err = sched.assume(assumedPod, scheduleResult.SuggestedHost)
+#3
+err := sched.bind(bindingCycleCtx, fwk, assumedPod, scheduleResult.SuggestedHost, state) --> func (sched *Scheduler) bind(ctx context.Context, fwk framework.Framework, assumed *v1.Pod, targetNode string,
+
+
+#调度两阶段 -- 寻找符号条件的节点
+feasibleNodes, diagnosis, err := g.findNodesThatFitPod(ctx, extenders, fwk, state, pod)
+#调度两阶段 -- 选择最适合的节点
+priorityList, err := prioritizeNodes(ctx, extenders, fwk, state, pod, feasibleNodes) 
+
+
+func New(ttl time.Duration, stop <-chan struct{}) Cache
+
+func (cache *schedulerCache) AssumePod(pod *v1.Pod) error
+
+
+1 Pod的调度是通过一个队列SchedulingQueue异步工作的
+	监听到对应pod事件后,放入队列
+	有个消费者从队列中获取pod,进行调度
+2 单个pod的调度主要分为3个步骤:
+	根据Predict和Priority两个阶段,调用各自的算法插件,选择最优的Node
+	Assume这个Pod被调度到对应的Node,保存到cache
+	用extender和plugins进行验证,如果通过则绑定
+3 绑定成功后,将数据通过client向kube-apiserver发送,更新etcd
+
+#---------------------------------------#---------------------------------------#
+kube-controller-manager - 了解控制管理中心
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-012/
+
+kubernetes/cmd/kube-controller-manager/controller-manager.go
+
+1 运行的主函数
+2 控制器的启动函数
+3 引入概念ReplicaSet
+4 查看ReplicaSetController
+5 ReplicaSet的核心实现函数
+
+command := app.NewControllerManagerCommand() --> func NewControllerManagerCommand() *cobra.Command
+--> if err := Run(c.Complete(), wait.NeverStop); err != nil { --> func Run(c *config.CompletedConfig, stopCh <-chan struct{}) error
+
+if err := StartControllers(ctx, controllerContext, startSATokenController, controllerInitializers, --> func StartControllers(ctx context.Context, controllerCtx ControllerContext, startSATokenController InitFunc
+
+func NewControllerInitializers(loopMode ControllerLoopMode) map[string]InitFunc --> func startReplicaSetController(ctx context.Context, controllerContext ControllerContext)
+--> func (rsc *ReplicaSetController) Run(ctx context.Context, workers int) --> go wait.UntilWithContext(ctx, rsc.worker, time.Second)
+--> func (rsc *ReplicaSetController) worker(ctx context.Context) 
+
+go replicaset.NewReplicaSetController( --> func NewReplicaSetController(rsInformer appsinformers.ReplicaSetInformer, podInformer coreinformers.PodInformer,
+--> return NewBaseController(rsInformer, podInformer, kubeClient, burstReplicas, --> func NewBaseController(rsInformer appsinformers.ReplicaSetInformer,
+--> rsc.syncHandler = rsc.syncReplicaSet --> func (rsc *ReplicaSetController) syncReplicaSet(ctx context.Context, key string) error
+
+#扩缩容
+manageReplicasErr = rsc.manageReplicas(ctx, filteredPods, rs)
+
+
+1 kube-controller-manager 的核心思想是: 根据期望状态和当前状态,管理Kubernetes中的资源。
+2 以ReplicaSet为例,它对比了定义声明的Pod数和当前集群中满足条件的Pod数,进行相对应的扩缩容
+
+#---------------------------------------#---------------------------------------#
+kubelet - 节点上控制容器生命周期的管理者
+#---------------------------------------#---------------------------------------#
+https://junedayday.github.io/2021/02/18/k8s/k8s-013/
+
+kubernetes/cmd/kubelet/kubelet.go
+
+1 运行的主函数
+2 运行kubelet
+3 核心数据管理Kubelet
+4 同步循环
+5 处理pod的同步工作
+
+command := app.NewKubeletCommand() --> func NewKubeletCommand() *cobra.Command --> return Run(ctx, kubeletServer, kubeletDeps, utilfeature.DefaultFeatureGate)
+--> func Run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Dependencies, --> if err := run(ctx, s, kubeDeps, featureGate);
+--> func run(ctx context.Context, s *options.KubeletServer, kubeDeps *kubelet.Dependencies, --> if err := RunKubelet(s, kubeDeps, s.RunOnce);
+--> func RunKubelet(kubeServer *options.KubeletServer, --> startKubelet(k, podCfg, &kubeServer.KubeletConfiguration, kubeDeps, kubeServer.EnableServer)
+--> func startKubelet(k kubelet.Bootstrap, podCfg *config.PodConfig, --> go k.Run(podCfg.Updates())
+
+#Run方法
+type Kubelet struct --> func (kl *Kubelet) Run(updates <-chan kubetypes.PodUpdate) --> kl.syncLoop(updates, kl)
+--> func (kl *Kubelet) syncLoop(updates <-chan kubetypes.PodUpdate, handler SyncHandler) --> if !kl.syncLoopIteration(updates, handler, syncTicker.C, housekeepingTicker.C, plegCh) 
+--> func (kl *Kubelet) syncLoopIteration(configCh <-chan kubetypes.PodUpdate, handler SyncHandler, --> podsToSync := kl.getPodsToSync()
+
+func (kl *Kubelet) HandlePodSyncs(pods []*v1.Pod)
+
+#对接docker
+result := kl.containerRuntime.SyncPod(pod, podStatus, pullSecrets, kl.backOff)
+
+
+1 kubelet是kubernetes的Node节点上的管理者
+
+2 kubelet接收来自kube-apiserver上的pod消息,用Ticker这种周期性的方式触发同步函数
+
+3 kubelet会异步地对容器进行管理,调用对应容器的接口(Container Runtime Interface)
+
+
+
+
+

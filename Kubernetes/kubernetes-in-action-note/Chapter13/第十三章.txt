@@ -1,0 +1,558 @@
+第十三章 保障集群内节点和网络安全
+
+### 13.1 在pod中使用宿主节点的Linux命名空间
+
+13.1.1 在pod中使⽤宿主节点的⽹络命名空间
+
+```yaml
+vim /root/pod-with-hostnetwork.yaml
+apiVersion: v1
+kind: Pod
+metadata: 
+  name: pod-with-host-network
+spec:
+  hosstNetwork: true
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", "9999999"]
+kubectl create -f pod-with-hostnetwork.yaml
+
+kubectl exec pod-with-host-network ifconfig #查看IP
+```
+
+13.1.2 绑定宿主节点上的端⼜⽽不使⽤宿主节点的⽹络命名空间
+
+```yaml
+vim /root/kubia-hostport.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kubia-hostport
+spec:
+  containers:
+  - image: luksa/kubia
+    name: kubia
+    port: 
+    - containerPort: 8080
+      hostPort: 9000
+      protocol: TCP
+kubectl create -f kubia-hostport.yaml
+```
+
+13.1.3 使⽤宿主节点的PID与IPC命名空间
+
+```yaml
+vim /root/pod-with-host-pidand-ipc.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-with-host-pid-and-ipc
+spec:
+  hostPID: true
+  hostIPC: true
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", '9999999']
+kubectl create -f pod-with-host-pidand-ipc.yaml
+kubectl exec pod-with-host-pid-and-ipc ps aux #可以查看node节点进程
+```
+
+### 13.2 配置节点的安全上下文
+
+```shell
+运⾏pod⽽不配置安全上下⽂
+kubectl run pod-with-defaults --image alpine --restart Never -- /bin/sleep 999999
+$ pod/pod-with-defaults created
+
+kubectl exec pod-with-defaults -- id #提示加上 --
+$ uid=0(root) gid=0(root) groups=0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+```
+
+13.2.1 使⽤指定⽤户运⾏容器
+
+```yaml
+vim /root/pod-as-user-guest.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-as-user-guest
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", '9999999']
+    securityContext:
+      runAsUser: 405
+kubectl create -f pod-as-user-guest.yaml
+kubectl exec pod-as-user-guest -- id
+```
+
+13.2.2 阻⽌容器以root⽤户运⾏
+
+```yaml
+vim /root/pod-run-as-non-root.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-run-as-non-root
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", '9999999']
+    securityContext:
+      runAsNonRoot: true
+kubectl create -f pod-run-as-non-root.yaml
+kubectl get po pod-run-as-non-root
+```
+
+13.2.3 使⽤特权模式运⾏pod
+
+```yaml
+vim /root/pod-privileged.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-privileged
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", '9999999']
+    securityContext:
+      privileged: true
+kubectl create -f pod-privileged.yaml
+kubectl exec -it pod-privileged -- ls /dev
+kubectl exec -it pod-with-defaults -- ls /dev #对比上面的输出
+```
+
+13.2.4 为容器单独添加内核功能
+
+```yaml
+不允许修改设定时间
+kubectl exec -it pod-with-defaults -- date +%T -s "12:00:00"
+$ date: can't set date: Operation not permitted #提示信息
+
+修改方法
+vim /root/pod-add-settime-capability.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-add-setting-capability
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", '9999999']
+    securityContext:
+      capabilities:
+        add:
+        - SYS_TIME
+kubectl create -f pod-add-settime-capability.yaml
+kubectl exec -it pod-add-setting-capability -- date +%T -s "12:00:00"
+kubectl exec -it pod-add-setting-capability -- date
+```
+
+13.2.5 在容器中禁⽤内核功能
+
+```yaml
+可以在pod-with-defaults中将/tmp⽬录的所有者改为guest⽤户
+kubectl exec -it pod-with-defaults -- chown guest /tmp
+kubectl exec -it pod-with-defaults -- ls -la / | grep tmp
+
+禁止以上行为方法
+vim /root/pod-drop-chown-capability.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-drop-chown-capability
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", '9999999']
+    securityContext:
+      capabilities:
+        drop:
+        - CHOWN
+kubectl create -f pod-drop-chown-capability.yaml
+
+kubectl exec -it pod-drop-chown-capability -- chown guest /tmp
+$ chown: /tmp: Operation not permitted
+$ command terminated with exit code 1
+```
+
+13.2.6 阻⽌对容器根⽂件系统的写⼊
+
+```yaml
+vim /root/pod-with-readonly-filesystem.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-with-readonly-filesystem
+spec:
+  containers:
+  - name: main
+    image: alpine
+    command: ["/bin/sleep", '9999999']
+    securityContext:
+      readOnlyRootFilesystem: true
+    volumeMounts:
+    - name: my-volume
+      mountPath: /volume
+      readOnly: false
+  volumes:
+  - name: my-volume
+    emptyDir:
+kubectl create -f pod-with-readonly-filesystem.yaml
+
+kubectl exec -it pod-with-readonly-filesystem -- touch /new-file
+$ touch: /new-file: Read-only file system
+$ command terminated with exit code 1
+
+kubectl exec -it pod-with-readonly-filesystem -- touch /volume/new-file #ok
+kubectl exec -it pod-with-readonly-filesystem -- ls -la /volume/new-file #ok
+```
+
+13.2.7 容器使⽤不同⽤户运⾏时共享存储卷
+
+```shell
+vim /root/pod-with-sharedvolume-fsgroup.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-with-shared-volume-fsgroup
+spec:
+  securityContext:
+    fsGroup: 555
+    supplementalGroups: [666, 777]
+  containers:
+  - name: first
+    image: alpine
+    command: ["/bin/sleep", '9999999']
+    securityContext:
+      runAsUser: 1111
+    volumeMounts:
+    - name: shared-volume
+      mountPath: /volume
+      readOnly: false
+  - name: second
+    image: alpine
+    command: ["/bin/sleep", '9999999']
+    securityContext:
+      runAsUser: 2222
+    volumeMounts:
+    - name: shared-volume
+      mountPath: /volume
+      readOnly: false
+  volumes:
+  - name: shared-volume
+    emptyDir:
+kubectl create -f pod-with-sharedvolume-fsgroup.yaml
+
+
+kubectl exec -it pod-with-shared-volume-fsgroup -c first sh 
+/ $ id #输入id
+/ $ ls -l / | grep volume
+/ $ echo foo > /volume/foo
+/ $ ls -l /volume
+
+kubectl describe pod/pod-with-shared-volume-fsgroup -n default
+```
+
+### 13.3 限制pod使用安全相关的特性
+
+13.3.1 PodSecurityPolicy资源介绍
+
+PodSecurityPolicy是⼀种集群级别(⽆命名空间)的资源
+
+维护PodSecurityPolicy资源中配置策略的⼯作由集成在API服务器中的PodSecurityPolicy准⼊控制插件完成
+
+**你的集群中不⼀定启⽤了PodSecurityPolicy准⼊控制插件！！！需要先启动**
+
+其中一个演示需要开启basic authenticate插件
+
+```yaml
+启⽤RBAC和PodSecurityPolicy准⼊控制
+
+vim /root/pod-security-policy.yaml
+apiVersion: extensions/v1
+kind: PodSecurityPolicy
+metadata:
+  name: default
+spec:
+  hostIPC: false
+  hostPID: false
+  hostNetwork: false
+  hostPort:
+  - min: 10000
+    max: 11000
+  - min: 13000
+    max: 14000
+  privileged: false
+  readOnlyRootFilesystem: true
+  runAsUser:
+    rule: RunAsAny
+  fsGroup:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  selinux:
+    rule: RunAsAny
+  volumes:
+  - '*'
+kubectl create -f pod-security-policy.yaml #部署需要前置设置
+
+配置以上 PodSecurityPolicy 后,在执行 kubectl create -f pod-privileged.yaml 将报错
+
+官网参考资料:
+https://kubernetes.io/docs/concepts/policy/pod-security-policy/
+```
+
+13.3.2 了解runAsUser、fsGroup和supplementalGroup策略
+
+```yaml
+使⽤MustRunAs规则
+vim /root/psp-must-runas.yaml
+apiVersion: extensions/v1
+kind: PodSecurityPolicy
+metadata:
+  name: default
+spec:
+  hostIPC: false
+  hostPID: false
+  hostNetwork: false
+  hostPort:
+  - min: 10000
+    max: 11000
+  - min: 13000
+    max: 14000
+  privileged: false
+  readOnlyRootFilesystem: true
+  runAsUser:
+    rule: MustRunAs
+    ranges:
+    - min: 2
+      max: 2
+    fsGroup:
+      rule: MustRunAs
+      ranges:
+      - min: 2
+        max: 10
+      - min: 20
+        max: 30
+    supplementalGroups:
+      rule: MustRunAs
+      ranges: 
+      - min: 2
+        max: 10
+      - min: 20
+        max: 30
+kubectl create -f psp-must-runas.yaml
+```
+
+```shell
+部署runAsUser在指定范围之外的pod
+如果尝试使⽤之前的pod-as-user-guest.yaml⽂件部署⼀个pod,其中指定了容器运⾏的⽤户ID为405,API服务器会拒绝这个pod
+kubectl create -f pod-as-user-guest.yaml #报错
+
+kubectl run run-as-5 --image luksa/kubia-run-as-user-5 --restart Never
+kubectl exec run-as-5 -- id
+```
+
+13.3.3 配置允许、默认添加、禁⽌使⽤的内核功能
+
+以下三个字段会影响容器可以使⽤的内核功能:
+
+allowedCapabilities
+
+defaultAddCapabilities
+
+requiredDropCapabilities
+
+```yaml
+vim /root/psp-capabilities.yaml
+apiVersion: extensions/v1
+kind: PodSecurityPolicy
+spec:
+  allowedCapabilities:
+  - SYS_TIME
+  defaultAddCapabilities:
+  - CHOWN
+  requiredDropCapabilities:
+  - SYS_ADMIN
+  - SYS_MODULE
+ ...
+kubectl create -f psp-capabilities.yaml
+
+如果⽤户试图在创建的pod中显式加⼊requiredDropCapabilities字段中的内核功能,这个pod会被拒绝
+kubectl create -f pod-add-sysadmin-capability.yaml
+```
+
+13.3.4 限制pod可以使⽤的存储卷类型
+
+```yaml
+仅允许特定类型存储卷的PodSecurityPolicy⽚段
+vim /root/pspvolumes.yaml
+kind: PodSecurityPolicy
+spec:
+  volumes:
+  - emptyDir
+  - configMap
+  - secret
+  - downwardAPI
+  - persistentVlumeClaim
+kubectl create -f pspvolumes.yaml
+```
+
+13.3.5 对不同的⽤户与组分配不同的PodSecurityPolicy
+
+**PodSecurityPolicy是集群级别的资源**,不能存储和应⽤在某⼀特定的命名空间上
+
+对不同⽤户分配不同PodSecurityPolicy是通过前⼀章中描述的RBAC机制实现的。这个⽅法是,创建你需要的PodSecurityPolicy资源,然后创建ClusterRole资源并通过名称将它们指向不同的策略,以此使 PodSecurityPolicy 资 源 中 的 策 略 对 不 同 的 ⽤ 户 或 组 ⽣ 效 。 通 过ClusterRoleBinding资源将特定的⽤户或组绑定到ClusterRole上,当PodSecurityPolicy访问控制插件需要决定是否接纳⼀个pod时,它只会考虑创建pod的⽤户可以访问到的PodSecurityPolicy中的策略。
+
+```yaml
+⾸先,创建另⼀个PodSecurityPolicy
+vim /root/psp-privileged.yaml
+apiVersion: extensions/v1
+kind: PodSecurityPolicy
+metadata:
+  name: privileged
+spec:
+  privileged: true
+  runAsUser:
+    rule: RunAsAny
+  fsGroup:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  selinux:
+    rule: RunAsAny
+  volumes:
+  - '*'
+kubectl create -f psp-privileged.yaml
+
+kubectl get psp
+default策略禁⽌运⾏特权容器,然⽽privileged策略是允许的
+
+
+
+
+
+使⽤RBAC将不同的PodSecurityPolicy分配给不同⽤户
+kubectl create clusterrole psp-default --verb=use --resource=podsecuritypolicies --resource-name=default
+$ clusterrole.rbac.authorization.k8s.io/psp-default created
+kubectl create clusterrole psp-privileged --verb=use --resource=podsecuritypolicies --resource-name=privileged
+$ clusterrole.rbac.authorization.k8s.io/psp-privileged created
+
+将该ClusterRole绑定到这个组
+kubectl create clusterrolebinding psp-all-users --clusterrole=psp-default --group=system:authenticated
+$ clusterrolebinding.rbac.authorization.k8s.io/psp-all-users created
+
+将psp-privileged ClusterRole绑定到⽤户Bob
+kubectl create clusterrolebinding psp-bob --clusterrole=psp-privileged --user=bob
+$ clusterrolebinding.rbac.authorization.k8s.io/psp-bob created
+
+为kubectl创建不同⽤户
+⽤kubectl的config⼦命令创建两个新⽤户
+kubectl config set-credentials alice --username=alice --password=password
+kubectl config set-credentials bob --username=bob --password=password
+使⽤不同⽤户创建pod
+kubectl --user "alice" create -f pod-privileged.yaml  #指令问题
+#与预期相同,API服务器不允许Alice创建特权pod
+
+kubectl --user "bob" create -f pod-privileged.yaml #指令问题
+#应该可以通过
+```
+
+### 13.4 隔离pod的网络
+
+13.4.1 在⼀个命名空间中启⽤网络隔离
+
+```yaml
+vim /root/network-policydefault-deny.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: 
+  name: default-deny
+spec:
+  podSelector:
+kubectl create -f network-policydefault-deny.yaml
+```
+
+在任何⼀个特定的命名空间中创建该NetworkPolicy之后,任何客户端都不能访问该命名空间中的pod。
+
+注意 集群中的CNI插件或其他⽹络⽅案需要⽀持NetworkPolicy,否则NetworkPolicy将不会影响pod之间的可达性。
+
+13.4.2 允许同⼀命名空间中的部分pod访问⼀个服务端pod
+
+```yaml
+vim /root/network-policypostgres.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: 
+  name: postgres-netpolicy
+spec:
+  podSelector:
+    matchLabels:
+      app: database
+    ingress:
+    - from: 
+      - podSelector:
+        matchLabels:
+          app: webserver
+      ports:
+      - port: 5432
+kubectl create -f network-policypostgres.yaml
+```
+
+13.4.3 在不同Kubernetes命名空间之间进⾏⽹络隔离
+
+```yaml
+vim /root/network-policy-cart.yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: 
+  name: shoppingcart-netpolicy
+spec:
+  podSelector:
+    matchLables:
+      app: shopping-cart
+  ingress:
+  - from:
+    - nameapaceSelector:
+        machLabels:
+          tennat: manning
+    ports:
+    - port: 80
+kubectl create -f network-policy-cart.yaml
+```
+
+13.4.4 使⽤CIDR隔离⽹络
+
+```yaml
+vim /root/network-policy-cidr.yaml
+ingress:
+- from:
+  - ipBlock:
+      cidr: 192.168.1.0/24
+kubectl create -f network-policy-cidr.yaml
+```
+
+13.4.5 限制pod的对外访问流量
+
+```yaml
+vim /root/network-policy-egress.yaml
+spec:
+  podSelector:
+    matchLabels:
+      app: webserver
+  egress: #限制pod的出网流量
+  - to: 
+    - podSelector:
+        matchLabels: 
+          app: database
+kubectl create -f network-policy-egress.yaml
+```

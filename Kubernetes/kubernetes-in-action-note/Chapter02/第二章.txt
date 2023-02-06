@@ -1,0 +1,50 @@
+容器 到底是怎样隔离它们的,有两个机制
+Linux命名空间,它使每个进程只看到它自己的系统视图(⽂件、进程、网络接口、主机名等)
+Linux控制组(cgroups),它限制了进程能使⽤的资源量(CPU、内存、网络带宽等)
+
+2.1 创建、运行及共享容器镜像
+docker run busybox echo ”Hello world” #运行 Hello world
+
+2.1.2 创建一个简单的 Node.js 应用
+docker build -t kubia . #dockerfile 构建镜像
+FROM node:7
+ADD app.js /app.js
+ENTRYPOINT ["node", "app.js"]
+
+docker run --name kubia-container -d -p 8080:8080 kubia #运行
+curl localhost:8080
+docker inspect kubia-container
+docker exec -it kubia-container bash
+
+docker tag kubia gogolang/kubia #docker hub ID
+docker push gogolang/kubia #推送镜像到docker hub
+docker images | head
+
+
+
+2.3 Kubernetes 上运行第一个应用
+kubectl run kubia --image=gogolang/kubia --port=8080 --generator=run/vl
+#--image=gogolang/kubia 显⽰的是指定要运⾏的容器镜像
+--port=8080选项告诉Kubernetes 应⽤正在监听8080端⼜
+#--generator表示创建一个Replication Controller 已经被弃用；这里创建的是一个pod服务
+
+kubectl get po -o wide
+curl 10.244.1.231:8080 #10.244.1.231 是上面显示的pod IP
+
+创建一个服务对对象
+kubectl expose pod kubia --type=LoadBalancer --name kubia-http
+#expose 命令的输出中提到⼀个名为kubian-http 的服务
+kubectl get services #查看创建的服务信息 #kubectl get svc 是一样的效果
+http://EXTERNAL-IP:8080 #访问 services 创建的静态IP
+
+
+kubectl get replicationcontrollers
+kubectl scale rc kubia --replicas=3 #增加期望的副本数
+
+kubectl get pods -o wide #显示pod的IP和所运行的节点
+
+kubectl cluster-info | grep dashboard #不适用于kubeadm搭建使用
+
+kubectl api-resources #complete list of supported resources
+kubectl explain <resource> #for a detailed description of that resource (e.g. kubectl explain pods).
+kubectl options #for a list of global command-line options (applies to all commands).

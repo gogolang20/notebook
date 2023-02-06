@@ -1,0 +1,75 @@
+1 
+
+
+
+*******************************************************************
+Jenkins centos安装
+wget http://mirrors.jenkins.io/war-stable/latest/jenkins.war
+java -jar jenkins.war #安装 完成后密钥:0d41e93a4918416081a91189cedbc0ea
+This may also be found at: /root/.jenkins/secrets/initialAdminPassword
+
+官网安装提示:https://www.jenkins.io/zh/doc/book/installing/#linux
+要下载并运行Jenkins的WAR文件版本,请执行以下操作:
+    将最新的稳定Jenkins WAR包 下载到您计算机上的相应目录。
+    在下载的目录内打开一个终端/命令提示符窗口到。
+    运行命令java -jar jenkins.war
+    浏览http://localhost:8080并等到*Unlock Jenkins*页面出现。
+    继续使用Post-installation setup wizard后面步骤设置向导。
+将最新的稳定Jenkins WAR包下载到您计算机上的相应目录。
+
+
+http://192.168.245.169:8080/ #进入页面
+选择插件安装 --> 选择 '无' --> 安装 --> 创建第一个管理员用户:jenkins 123456 --> 
+保存并完成 --> 实例配置:http://192.168.245.169:8080/ --> 保存并完成 --> 开始使用Jenkins
+
+
+中文 Git Maven  三个插件
+Manage Jenkins --> Manage Plugins --> Available --> Localization: Chinese (Simplified) --> Download now and install after restart
+
+如果网不行,可以替换国内源
+Manage Jenkins --> Manage Plugins --> 高级 --> 升级站点:可以替换源地址
+
+Manage Jenkins --> Manage Plugins --> Available --> Git (This plugin integrates Git with Jenkins) --> Download now and install after restart
+
+下载maven插件:
+Jenkins plugins官网搜索:maven integration
+https://plugins.jenkins.io/maven-plugin/
+下载地址:https://updates.jenkins.io/download/plugins/maven-plugin/
+
+Manage Jenkins --> Manage Plugins --> 高级 --> 上传插件:选择文件后上传 maven-plugin.hpi
+http://192.168.245.169:8080/restart 重启 Jenkins
+
+首页:新建任务 --> 创建一个自己的项目:myjob --> 构建一个自由风格的软件项目 -->
+确定 --> 
+git仓库:https://github.com/bjmashibing/InternetArchitect.git
+	源码管理 --> Git --> https://github.com/bjmashibing/InternetArchitect.git
+	构建触发器 --> 轮询SCM --> * * * * * --> 保存
+重新再 修改构建 --> 立即构建
+
+ssh连接git:生成公私钥 --> Git的setting中设置ssh连接
+	ssh私钥添加到Jenkins 创建的项目中
+
+再新建一个maven构建的项目:源码构建依旧使用ssh
+
+
+
+
+
+下载maven:wget https://archive.apache.org/dist/maven/maven-3/3.6.3/binaries/apache-maven-3.6.3-bin.tar.gz
+tar xf apache-maven-3.6.3-bin.tar.gz #解压
+mkdir /usr/maven
+mv apache-maven-3.6.3 /usr/maven/
+vim /etc/profile
+export MAVEN_HOME=/usr/maven/apache-maven-3.6.3
+export PATH=$PATH:$MAVEN_HOME/bin
+mvn -v
+
+
+
+附录:
+Jenkins官网:https://www.jenkins.io
+插件网址:https://plugins.jenkins.io/
+
+tomcat常用版本的下载
+wget https://dlcdn.apache.org/tomcat/tomcat-8/v8.5.70/bin/apache-tomcat-8.5.70.tar.gz
+

@@ -1,0 +1,462 @@
+第四章 副本机制和其他控制器:部署托管的pod
+
+4.1 保持pod健康
+通过存活探针 (liveness probe) 检查容器是否还在运行
+Kubemetes 还支持就绪探针 (readiness probe)
+
+Kubernetes 有以下三种探测容器的机制
+1 HTTPGET探针对容器的 IP 地址(你指定的端口和路径)执行 HTTPGET 请求。如果探测器收到响应,并且响应状态码不代表错误(换句话说,如果HTTP响应状态码是2xx或3xx), 则认为探测成功。如果服务器返回错误响应状态码或者根本没有响应,那么探测就被认为是失败的,容器将被重新启动。
+2 TCP套接字探针尝试与容器指定端口建立TCP连接。如果连接成功建立,则探测成功。否则,容器重新启动
+3 Exec探针在容器内执行任意命令,并检查命令的退出状态码。如果状态码是0, 则探测成功。所有其他状态码都被认为失败
+
+
+4.1.2 创建基于HTTP的存活探针
+**** **** **** kubia-liveness-probe.yaml **** **** ****
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kubia-liveness
+spec:
+  containers:
+  - image: luksa/kubia-unhealthy
+    name: kubia
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 8080
+kubectl create -f kubia-liveness-probe.yaml
+
+kubectl get po kubia-liveness
+
+kubectl logs kubia-liveness --previous #前一个pod的日志
+
+kubectl describe po kubia-liveness #重启容器后pod描述
+
+-----------------------------------------------------------------------
+kubectl  exec -it kubia-liveness /bin/bash #容器内部查看app.js代码
+const http = require('http');
+const os = require('os');
+
+console.log("Kubia server starting...");
+
+var requestCount = 0;
+
+var handler = function(request, response) {
+  console.log("Received request from " + request.connection.remoteAddress);
+  requestCount++;
+  if (requestCount > 5) {
+    response.writeHead(500);
+    response.end("I'm not well. Please restart me!");
+    return;
+  }
+  response.writeHead(200);
+  response.end("You've hit " + os.hostname() + "\n");
+};
+
+var www = http.createServer(handler);
+www.listen(8080);
+-----------------------------------------------------------------------
+
+4.1.4 配置存活探针的附加属性
+**** **** **** kubia-liveness-probe-initial-delay.yaml **** **** ****
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kubia-liveness
+spec:
+  containers:
+  - image: luksa/kubia-unhealthy
+    name: kubia
+    livenessProbe:
+      httpGet:
+        path: /
+        port: 8080
+      initialDelaySeconds: 15 #容器启动15秒后探测
+kubectl create -f kubia-liveness-probe-initial-delay.yaml
+#基于kubia-liveness-probe.yaml 配置添加 initialDelaySeconds参数
+
+提示 务必记得设置一个初始延迟来说明应用程序的启动时间。
+
+4.1.5 创建有效的存活探针
+提示 请确保/health HTTP端点不需要认证,否则探测会一直失败,导致你的容器⽆限重启
+在探针中⾃⼰实现重试循环是浪费精力
+
+
+4.2 了解ReplicationController
+
+4.2.1 ReplicationController的操作
+
+ReplicationController的⼯作是确保pod的数量始终与其标签选择器匹配。
+一个ReplicationController有三个主要部分
+1 label selector ( 标签选择器):用于确定ReplicationController作用域中有哪些pod
+2 replica count (副本个数):指定应运行的pod 数量
+3 pod template (pod模板):用于创建新的pod 副本
+
+更改标签选择器和pod模板对现有pod没有影响
+
+
+4.2.2 创建一个 ReplicationController
+**** **** **** kubia-rc.yaml **** **** ****
+apiVersion: v1
+kind: ReplicationController
+metadata: 
+  name: kubia
+spec: 
+  replicas: 3
+  selector: #pod选择器决定了RC的操作对象
+    app: kubia
+  template: #创建pod所用的模板
+    metadata:
+      labels:
+        app: kubia
+    spec:
+      containers:
+      - name: kubia
+        image: gogolang/kubia
+        ports:
+        - containerPort: 8080
+kubectl create -f kubia-rc.yaml 
+$ replicationcontroller/kubia created
+
+kubectl get po -l app #按标签查看
+
+
+4.2.3 使用ReplicationController
+kubectl get pods -o wide #重新查看
+kubectl get rc
+kubectl describe rc kubia #查看 Events
+
+node节点模拟故障
+ifconfig ens33 down
+kubectl get pods #master 查看,会重建pod
+ifconfig ens33 up
+
+
+4.2.4 将 pod 移入或移出 ReplicationController 的作用域
+kubectl label pod {podName} type=special #添加标签不影响rc
+kubectl get pods --show-labels
+
+kubectl label pod {podName} app=foo --overwrite #修改已有的pod标签会影响rc
+kubectl get pods -L app #查看pod变化
+
+4.2.5 修改pod模板
+kubectl edit rc kubia #编辑ReplicationController
+#找到pod 的 template部分并向 metadata添加一个 新的标签
+----------------------------------------------------
+ ...
+spec:
+  replicas: 3
+  selector:
+    app: kubia
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        added: kubia #添加的部分
+        app: kubia
+ ...
+----------------------------------------------------
+kubectl delete pod {podName} #删除一个pod后在查看变化
+
+#更改 ReplicationController 的 pod 模板只影响之后创建的 pod, 并且不会影响现有的 pod
+
+配置kubectl edit使用不同的文本编辑器
+export KUBE_EDITOR="/usr/bin/nano" #配置到环境变量
+
+
+4.2.6 水平缩放pod
+kubectl scale rc kubia --replicas=10 #或者使用另一种方式
+kubectl edit rc kubia
+apiVersion: v1
+metadata:
+ ...
+spec:
+  replicas: 3 #修改成 10
+  selector:
+    app: kubia
+ ...
+
+kubectl get rc
+
+kubectl scale rc kubia --replicas=3 #缩容
+
+4.2.7 删除—个 ReplicationController
+kubectl delete rc kubia --cascade=false #删除rc 并保留pod
+
+
+4.3 使用 ReplicaSet而不是ReplicationController
+
+4.3.1 比较ReplicaSet和 ReplicationController
+
+ReplicaSet的⾏为与ReplicationController完全相同,但pod选择器的 表达能⼒更强
+
+ReplicaSet 的选择器还允许匹配缺少某个标签的 pod, 或包含特定标签名的 pod, 不管其值如何。
+
+4.3.2 定义ReplicaSet
+**** **** **** kubia-replicaset.yaml **** **** ****
+apiVersion: apps/vlbeta2 #不是v1版本API的一部分但属于apps API组的v1beta2版本
+apiVersion: apps/v1 # apps/vlbeta2报错
+kind: ReplicaSet
+metadata:
+  name: kubia
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: kubia
+  template:
+    metadata:
+      labels:
+        app: kubia
+    spec:
+      containers:
+      - name: kubia
+        image: gogolang/kubia
+kubectl create -f kubia-replicaset.yaml
+
+
+4.3.3 创建和检查ReplicaSet
+kubectl get rs -o wide
+kubectl describe rs
+
+
+4.3.4 使用ReplicaSet的更富表达力的标签选择器
+vim /root/kubia-replicaset-matchexpressions.yaml
+apiVersion: apps/v1 #放弃使用apps/v1beta2
+kind: ReplicaSet
+metadata:
+  name: kubia
+spec:
+  replicas: 3
+  selector:
+    matchExpressions:
+      - key: app
+        operator: In
+        values:
+          - kubia
+  template:
+    metadata:
+      labels:
+        app: kubia
+    spec:
+      containers:
+      - name: kubia
+        image: gogolang/kubia
+kubectl create -f kubia-replicaset-matchexpressions.yaml #先删除之前的rs在创建
+四个有效的运算符
+1 In :Label的值 必须与其中 一个指定的values 匹配
+2 Notln : Label的值与任何指定的values 不匹配
+3 Exists : pod 必须包含一个指定名称的标签(值不重要)。使用此运算符时,不应指定 values字段
+4 DoesNotExist : pod不得包含有指定名称的标签。values属性不得指定 。
+
+
+4.3.5 ReplicaSet小结
+kubectl delete rs kubia #删除rs
+#删除ReplicaSet会删除所有的pod。这种情况下是需要列出pod来确认的
+
+
+4.4 使用 DaemonSet在每个节点上运行一个pod
+当你希望pod在集群中的每个节点上运⾏时,并且每个节点都需要正好一个运行的pod实例
+
+4.4.2 使用 DaemonSet 只在特定的节点上运行 pod
+DaemonSet将pod部署到集群中的所有节点上,除⾮指定这些pod只在部分节点上运行
+注意 在本书的后面,你将了解到节点可以被设置为不可调度的, 防⽌pod被部署到节点上。DaemonSet甚⾄会将pod部署到这些节点上, 因为⽆法调度的属性只会被调度器使用,
+而DaemonSet管理的pod则完 全绕过调度器。这是预期的,因为DaemonSet的⽬的是运行系统服务,即使是在不可调度的节点上,系统服务通常也需要运行。
+
+**** **** **** ssd-monitor-daemonset.yaml **** **** ****
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: ssd-monitor
+spec:
+  selector:
+    matchLabels:
+      app: ssd-monitor
+  template:
+    metadata:
+      labels:
+        app: ssd-monitor
+    spec:
+      nodeSelector:
+        disk: ssd
+      containers:
+      - name: main
+        image: luksa/ssd-monitor
+kubectl create -f ssd-monitor-daemonset.yaml
+$ daemonset.apps/ssd-monitor created
+
+kubectl get ds #显示0
+kubectl get po 
+
+向节点上添加所需的标签
+kubectl get node
+kubectl label node {nodeName} disk=ssd #向节点上添加所需的标签
+eg:kubectl label node k8s-node02 disk=ssd #打标签
+$ node/k8s-node02 labeled
+
+kubectl get po #再次查看
+
+kubectl label node {nodeName} disk=hdd --overwrite #修改标签
+eg:kubectl label node k8s-node02 disk=hdd --overwrite
+$ node/k8s-node02 labeled
+
+kubectl get po #pod如预期中正在被终止
+
+
+4.5 运行执行单个任务的pod
+
+4.5.1 介绍Job资源
+
+该 pod 在内部进程成功结束时,不重启容器。一旦任务完成,pod 就被认为处于完成状态。
+
+Job对于临时任务很有⽤,关键是任务要以正确的⽅式结 束。
+
+4.5.2 定义Job资源
+**** **** **** exporter.yaml **** **** ****
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: batch-job
+spec:
+  template:
+    metadata:
+      labels:
+        app: batch-job
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: main
+        image: luksa/batch-job
+kubectl create -f exporter.yaml
+$ job.batch/batch-job created
+
+#Job 属于batch API组,版本为 v1
+#Job 不能使用 Always为默认的重新启动策略
+#该镜像调用一个运行120秒的进程,然后退出。
+
+4.5.3 看Job运行一个pod
+kubectl get jobs
+kubectl get po
+kubectl get po -a #两分钟之后状态改变
+$kubectl get po --show-all 同上
+
+kubectl logs {jobName}
+eg:kubectl logs batch-job-cwzcf
+$ Sat Dec  4 12:22:27 UTC 2021 Batch job starting
+$ Sat Dec  4 12:24:27 UTC 2021 Finished succesfully
+
+4.5.4 在Job中运行多个pod实例
+**** **** **** multi-completion-batch-job.yaml **** **** ****
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: multi-completion-batch-job
+spec:
+  completions: 5
+  template:
+    metadata:
+      labels:
+        app: batch-job
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: main
+        image: luksa/batch-job
+#completions: 5 将使job顺序运行五个pod
+kubectl create -f multi-completion-batch-job.yaml
+$ job.batch/multi-completion-batch-job created
+
+并行运行Job pod
+**** **** **** multi-completion-parallel-batch-job.yaml **** **** ****
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: multi-completion-batch-job
+spec:
+  completions: 5
+  parallelism: 2
+  template:
+    metadata:
+      labels:
+        app: batch-job
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: main
+        image: luksa/batch-job
+#parallelism: 2 最多两个pod可以并行运行
+kubectl delete job multi-completion-batch-job #先删除之前创建的job
+kubectl create -f multi-completion-parallel-batch-job.yaml
+kubectl get po
+
+kubectl edit job  multi-completion-batch-job 
+修改参数 parallelism: 2 完成
+
+kubectl scale job {jobName} --replicas 3 #Job的缩放 
+eg: kubectl scale job multi-completion-batch-job --replicas 3 #执行报错了
+#将 parallelism 从 2 增加到 3
+
+
+4.5.5 限制Job pod完成任务的时间
+通过在pod配置中设置 activeDeadlineSeconds 属性,可以限制 pod的时间
+如果 pod 运行时间超过此时间,系统将尝试终止 pod, 并将 Job 标记为失败
+#通过指定 Job manifest 中的 spec.backoffLimit 字段, 可以配置 Job 在被标记为失败之前可以重试的次数。如果你没有明确指定它,则默认为6
+
+
+4.6 安排Job定期运行或在将来运行一次
+
+4.6.1 创建一个CronJob
+cat /etc/crontab
+
+**** **** **** cronjob.yaml **** **** ****
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: batch-job-every-fifteen-minutes
+spec:
+  schedule: "0,15,30,45 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: periodic-batch-job
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: main
+            image: luksa/batch-job
+kubectl create -f cronjob.yaml 
+$ cronjob.batch/batch-job-every-fifteen-minutes created
+
+#在该示例中,你希望每 15 分钟运行一 次任务因此 schedule 字段的值应该是
+"0, 15, 30, 45****" 这意味着每小时的0、15、30和45分钟(第一个星号),
+每月的每一天(第二个星号),每月(第三个星号)和每周的每一天(第四个星号)。
+
+CronJob通过CronJob规范中配置的jobTemplate属性创建任务资源
+
+4.6.2 了解计划任务的运行方式
+可能发生 Job或pod 创建并运行得相对较晚的情况
+eg:
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: batch-job-every-fifteen-minutes
+spec:
+  schedule: "0,15,30,45 * * * *"
+  startingDeadlineSeconds: 15
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: periodic-batch-job
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: main
+            image: luksa/batch-job
+#startingDeadlineSeconds: 15 pod最迟必须在预定时间后15秒开始运行
+kubectl create -f cronjob.yaml ###################
+#演示其中一个cronjob即可
+

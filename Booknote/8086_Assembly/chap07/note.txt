@@ -1,0 +1,31 @@
+and 和 or 指令
+
+
+si di 偏移地址寄存器
+
+[bx+si] [bx+di] 偏移地址的组合方式
+
+DOSBox debug:
+debug
+e 2000:1000
+BE 00 06 00 00 00
+a
+mov ax,2000H
+mov ds,ax
+mov bx,1000H
+mov si,0
+mov ax,ds:[bx+si]
+inc si
+mov cx,ds:[bx+si]
+inc si
+mov di,si
+add cx,ds:[bx+di]
+
+
+
+[bx+si+数字] [bx+di+数字] 偏移地址的组合方式
+
+
+
+
+

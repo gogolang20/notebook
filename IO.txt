@@ -1,0 +1,120 @@
+内存与IO, 磁盘IO, 网络IO
+
+## 1 虚拟文件系统,文件描述符,IO重定向
+
+pagecache(512B) --> dirty标记 --> 计算机Flush 写入磁盘
+
+什么是虚拟文件系统？
+df #命令
+df -h
+stat filename #查看元数据信息
+添加硬连接 ln 
+软连接 ln -s 
+
+pcstat -pid $$ #命令？？？
+lsof -op $$
+
+head -8 t.txt | tail -1 #读取文件第8行
+{ echo "123"; echo "12555"; }  #代码块
+$$ 优先级高于 管道 |
+
+
+
+指令:
+sysctl -a 
+sysctl -a  | grep dirty #脏页
+vim /etc/sysctl.conf #配置
+	vm.dirty_background_bytes = 0
+    vm.dirty_background_ratio = 10
+    vm.dirty_bytes = 0
+    vm.dirty_expire_centisecs = 3000
+    vm.dirty_ratio = 30
+    vm.dirty_writeback_centisecs = 500
+程序要先写入内存,在写入磁盘
+
+
+
+
+
+## 2 内核中PageCache、mmap作用、java文件系统io、nio
+
+
+
+
+## 3 Socket编程BIO及TCP参数
+用到的命令:
+netstat -natp
+lsof -p PID
+tcpdump -nn -i ens33 port 9090 #抓包  需要安装？？？
+ns IP Port
+
+
+
+strace -ff -o out {cmd} #追踪线程对系统的调用
+
+
+
+
+## 4 C10K问题及NIO精讲和IO模型性能压测
+http://kegel.com/
+http://kegel.com/c10k.html #问题出处
+
+
+
+
+
+## 5 网络编程之多路复用器及Epoll精讲
+
+
+
+
+
+## 6 网络编程java API 实战多路复用器开发
+
+
+
+
+
+## 7 全手写急速理解Netty模型及IO模型应用实战
+
+
+
+
+
+## 8 Netty之IO模型开发本质手写部分实现推导篇
+
+
+
+
+
+## 9 全手写基于Netty的RPC框架自定义协议,连接池
+
+
+
+
+
+## 10 全手写基于Netty的RPC框架 协议编解码问题 粘包拆包与内核关系
+
+
+
+
+
+## 11 全手写基于Netty的RPC框架
+
+
+
+
+
+## 12 全手写基于Netty的RPC框架
+
+
+
+
+
+## 13 自定义HTTP协议解析和HTTPserver调用实现
+
+
+
+附录
+pcstat 指令: 查看pagecache详情,安装golang后编译
+yum install -y lsof  #安装后使用 lsof 命令

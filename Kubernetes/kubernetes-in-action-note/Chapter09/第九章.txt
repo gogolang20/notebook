@@ -1,0 +1,240 @@
+  
+
+## 第九章 **Deployment** 声明式地升级应用
+
+### 9.1 更新运行在pod内的应用程序
+
+```
+有以下两种⽅法可以更新所有pod:
+1 直接删除所有现有的pod,然后创建新的pod。 
+2 也可以先创建新的pod,并等待它们成功运⾏之后,再删除旧的pod。可以先创建所有新的pod,然后⼀次性删除所有旧的pod,或者按顺序创建新的pod,然后逐渐删除旧的pod。
+```
+
+9.1.1 删除旧版本pod, 使用新版本pod替换
+
+```
+服务将短时间内不可用
+```
+
+9.1.2 先创建新pod再删除旧版本pod
+
+```
+可以修改服务的标签选择器并将Service的流量切换到新的pod。一旦确定了新版本的功能运⾏正常,就可以通过删除旧 的ReplicationController来删除旧版本的pod
+```
+
+注意 可以使⽤ kubectl set selector 命令来修改Service的pod选择器。
+
+### 9.2 使用 ReplicationController实现自动的滚动升级
+
+9.2.1 运行第一个版本的应用
+
+```
+vim /root/kubia-rcand-service-v1.yaml
+apiVersion: v1
+kind: ReplicationController
+metadata:
+  name: kubia-v1
+spec:
+  replicas: 3
+  template:
+    metadata:
+      name: kubia
+      labels:
+        app: kubia
+    spec:
+      containers:
+      - image: luksa/kubia:v1
+        name: nodejs
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubia
+spec:
+  type: LoadBalancer
+  selector:
+    app: kubia
+  ports:
+  - port: 80
+    targetPort: 8080
+kubectl create -f kubia-rcand-service-v1.yaml
+kubectl get svc kubia #获取
+while true; do curl http://EXTERNAL-IP ; done
+eg:while true; do curl http://192.168.152.151:31690 ; done
+#######################################
+#虚拟机需要将worker节点的IP当作EXTERNAL-IP
+```
+
+9.2.2 使用kubectl来执行滚动式升级
+
+```
+kubectl rolling-update kubia-vl kubia-v2 --image=luksa/kubia:v2 #提示无此命令,可能是GKE环境的命令
+
+kubectl describe rc kubia-v2
+kubectl describe rc kubia-v1
+#其实在滚动升级过程中,第⼀个ReplicationController的选择器也会被修改
+
+kubectl get po --show-labels
+```
+
+9.2.3 为什么 kubectl rolling-update 已经过时
+
+```
+kubectl rolling-update kubia-vl kubia-v2 --image=luksa/kubia:v2 --v 6
+#使⽤--v 6 选项会提⾼⽇志级别使得所有kubectl发起的到API服务器的请求都会被输出。
+
+为什么由客户端执⾏升级过程,⽽不是服务端执⾏是不好的呢？
+1 kubectl执行升级可能失去网络连接,升级将处于中间状态
+2 Kubernetes设计是声明式,而不是告诉机器具体执行什么
+```
+
+### 9.3 使用 Deployment声明式地升级应用
+
+9.3.1 创建—个 Deployment
+
+```
+vim /root/kubia-deployment-v1.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubia
+spec:
+  replicas: 3
+  template:
+    metadata:
+      name: kubia
+      labels:
+        app: kubia
+    spec:
+      containers:
+      - image: luksa/kubia:v1
+        name: nodejs
+  selector:
+    matchLabels:
+      app: kubia
+#⼀个Deployment资源⾼于版 本本⾝。Deployment可以同时管理多个版本的pod,所以在命名时不需要指定应⽤的版本号。
+kubectl delete rc --all #先删除之前的
+kubectl create -f kubia-deployment-v1.yaml --record ###########带上--record参数
+$ deployment.apps/kubia created
+kubectl rollout status deployment kubia
+$ deployment "kubia" successfully rolled out
+
+kubectl get rs #Deployment会创建多个ReplicaSet,⽤来对应和管理⼀个版本的pod模板
+```
+
+9.3.2 升级Deployment
+
+```
+kubectl patch deployment kubia -p '{"spec": {"minReadySeconds": 10}}'
+$ deployment.apps/kubia patched
+#提⽰ kubectl patch 对于修改单个或者少量资源属性⾮常有⽤,不需要再通过编辑器编辑。
+
+while true; do curl http://192.168.152.151:31690 ; done
+
+kubectl set image deployment kubia nodejs=luksa/kubia:v2
+$ deployment.apps/kubia image updated
+#kubectl set image 命令来更改任何包含容器资源的镜像(ReplicationController、ReplicaSet、Deployment等)
+
+
+注意 如果Deployment中的pod模板引⽤了⼀个ConfigMap(或Secret),那么更改ConfigMap资源本⾝将不会触发升级操作。如果真 的需要修改应⽤程序的配置并想触发更新的话,可以通过创建⼀个新 的ConfigMap并修改pod模板引⽤新的ConfigMap。
+
+kubectl get rs #被保留的旧ReplicaSet还有用处
+```
+
+9.3.3 回滚Deployment
+
+```
+kubectl set image deployment kubia nodejs=luksa/kubia:v3
+$ deployment.apps/kubia image updated
+
+kubectl rollout status deployment kubia
+$ Waiting for deployment "kubia" rollout to finish: 1 out of 3 new replicas have been updated...
+
+while true; do curl http://192.168.152.151:31690 ; done
+
+kubectl rollout undo deployment kubia #回滚
+$ deployment.apps/kubia rolled back
+
+kubectl rollout history deployment kubia
+$ deployment.apps/kubia 
+$ REVISION  CHANGE-CAUSE
+$ 1         kubectl create --filename=kubia-deployment-v1.yaml --record=true
+$ 3         kubectl create --filename=kubia-deployment-v1.yaml --record=true
+$ 4         kubectl create --filename=kubia-deployment-v1.yaml --record=true
+
+回滚到一个特定的 Deployment 版本
+kubectl rollout undo deployment kubia --to-revision=1
+$ deployment.apps/kubia rolled back
+
+################################
+每个ReplicaSet都⽤特定的版本号来保存Deployment的完整信息,所以不应 该⼿动删除ReplicaSet。如果这么做便会丢失Deployment的历史版本记录⽽导致⽆法回滚
+```
+
+9.3.4 控制滚动升级速率
+
+```
+有两个属性会决定⼀次替换多少 个pod:maxSurge和maxUnavailable。可以通过Deployment的 strategy 字段下rollingUpdate 的⼦属性来配置
+```
+
+9.3.5 暂停滚动升级
+
+```
+kubectl set image deployment kubia nodejs=luksa/kubia:v4
+$ deployment.apps/kubia image updated
+
+kubectl rollout pause deployment kubia #暂停升级
+$ deployment.apps/kubia paused
+
+kubectl rollout resume deployment kubia #恢复继续升级
+$ deployment.apps/kubia resumed
+
+注意 如果部署被暂停,那么在恢复部署之前,撤销命令不会撤销它。
+```
+
+9.3.6 阻止出错版本的滚动升级
+
+```
+#minReadySeconds 属性指定新创建的pod⾄少要成功运⾏多久之后,才能将其视为可⽤
+
+vim /root/kubia-deployment-v3-with-readinesscheck.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubia
+spec:
+  replicas: 3
+  minReadySeconds: 10
+  strategy:
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+    type: RollingUpdate
+  template:
+    metadata:
+      name: kubia
+      labels:
+        app: kubia
+    spec:
+      containers:
+      - image: luksa/kubia:v3
+        name: nodejs
+        readinessProbe:
+          periodSeconds: 1
+          httpGet:
+            path: /
+            port: 8080
+  selector:
+    matchLabels:
+      app: kubia
+kubectl apply -f kubia-deployment-v3-with-readinesscheck.yaml 
+#apply 命令可以⽤YAML⽂件中声明的字段来更新Deployment
+#演示无法升级成功的场景,部署过程⾃动被阻⽌
+
+kubectl rollout status deployment kubia
+$ Waiting for deployment "kubia" rollout to finish: 1 out of 3 new replicas have been updated...
+
+kubectl describe deploy kubia
+
+kubectl rollout undo deployment kubia
+$ deployment.apps/kubia rolled back
+```

@@ -1,0 +1,185 @@
+构建 Go 应用 docker 镜像的十八种姿势
+https://mp.weixin.qq.com/s/udpNP2LzF0bfn8w_wNcMYQ
+
+
+项目结构如下:
+.
+├── go.mod
+└── hello.go
+hello.go 代码如下:
+
+package main
+
+func main() {
+    println("hello world!")
+}
+
+
+
+**** **** **** 初级 **** **** ****
+Dockerfile:
+
+FROM golang:alpine
+
+WORKDIR /build
+
+COPY hello.go .
+
+RUN go build -o hello hello.go
+
+CMD ["./hello"]
+
+构建镜像:
+$ docker build -t hello:v1 .
+$ docker run -it --rm hello:v1 ls -l /build
+total 1260
+-rwxr-xr-x    1 root     root       1281547 Mar  6 15:54 hello
+-rw-r--r--    1 root     root            55 Mar  6 14:59 hello.go
+
+$ docker images | grep hello
+hello   v1    2783ee221014   44 minutes ago   314MB
+
+运行
+docker run -it --rm hello:v1
+hello world!
+
+
+
+**** **** **** 中级 **** **** ****
+$ docker images | grep golang
+golang    alpine     d026981a7165   2 days ago          313MB
+并且朋友告诉我可以把代码先编译好,再拷贝进去,就不用那个巨大的基础镜像了,不过说起来容易,我还是好好花了点功夫的,最后 Dockerfile 长这样:
+
+FROM alpine
+
+WORKDIR /build
+
+COPY hello .
+
+CMD ["./hello"]
+
+跑一下试试
+docker build -t hello:v2 .
+
+$ go build -o hello hello.go
+再跑 
+docker build -t hello:v2 .
+
+$ docker run -it --rm hello:v2
+standard_init_linux.go:228: exec user process caused: exec format error
+失败！好吧,格式不对,原来我们开发机不是 linux 呀,再来~
+
+$ GOOS=linux go build -o hello hello.go
+重新 docker build 终于搞定了,赶紧跑下
+
+$ docker run -it --rm hello:v2
+hello world!
+没问题,我们来看看内容和大小。
+
+$ docker run -it --rm hello:v2 ls -l /build
+total 1252
+-rwxr-xr-x    1 root     root       1281587 Mar  6 16:18 hello
+里面只有 hello 这个可执行文件,再也不用担心别人鄙视我的代码了~
+
+$ docker images | grep hello
+hello    v2   0dd53f016c93   53 seconds ago      6.61MB
+hello    v1   ac0e37173b85   25 minutes ago      314MB
+6.61MB, 绝对可以！
+
+
+**** **** **** 高级 **** **** ****
+现在流行什么多阶段构建,那么第二种方式到底有啥问题呢？
+我们要能从 Go 代码构建出 docker 镜像,其中分为三步:
+1 本机编译 Go 代码,如果牵涉到 cgo 跨平台编译就会比较麻烦了
+2 用编译出的可执行文件构建 docker 镜像
+3 编写 shell 脚本或者 makefile 让这几步通过一个命令可以获得
+多阶段构建就是把这一切都放到一个 Dockerfile 里,既没有源码泄漏,又不需要用脚本去跨平台编译,还获得了最小的镜像。
+
+如下 Dockerfile:
+FROM golang:alpine AS builder
+
+WORKDIR /build
+
+ADD go.mod .
+COPY . .
+RUN go build -o hello hello.go
+
+FROM alpine
+WORKDIR /build
+COPY --from=builder /build/hello /build/hello
+CMD ["./hello"]
+
+第一个 FROM 开始的部分是构建一个 builder 镜像,目的是在其中编译出可执行文件 hello,
+第二个 From 开始的部分是从第一个镜像里 copy 出来可执行文件 hello,并且用尽可能小的基础镜像 alpine 以保障最终镜像尽可能小
+
+我们先跑了验证一下:
+$ docker run -it --rm hello:v3
+hello world!
+
+没问题,正如预期！看看大小如何:
+$ docker images | grep hello
+hello    v3     f51e1116be11   8 hours ago    6.61MB
+hello    v2     0dd53f016c93   8 hours ago    6.61MB
+hello    v1     ac0e37173b85   8 hours ago    314MB
+
+跟第二种方法构建的镜像大小完全一样。再看看镜像里的内容:
+$ docker run -it --rm hello:v3 ls -l /build
+total 1252
+-rwxr-xr-x    1 root     root       1281547 Mar  6 16:32 hello
+
+
+**** **** **** 终极 goctl **** **** ****
+# 安装一下先
+$ GOPROXY=https://goproxy.cn/,direct go install github.com/zeromicro/go-zero/tools/goctl@latest
+
+# 一键编写 Dockerfile
+$ goctl docker -go hello.go
+
+看看生成的 Dockerfile:
+FROM golang:alpine AS builder
+
+LABEL stage=gobuilder
+
+ENV CGO_ENABLED 0
+ENV GOOS linux
+ENV GOPROXY https://goproxy.cn,direct
+
+WORKDIR /build
+
+ADD go.mod .
+ADD go.sum .
+RUN go mod download
+COPY . .
+RUN go build -ldflags="-s -w" -o /app/hello ./hello.go
+
+FROM alpine
+
+RUN apk update --no-cache && apk add --no-cache ca-certificates tzdata
+ENV TZ Asia/Shanghai
+
+WORKDIR /app
+COPY --from=builder /app/hello /app/hello
+
+CMD ["./hello"]
+
+其中几点可以了解下:
+默认禁用了 cgo
+启用了 GOPROXY
+去掉了调试信息 -ldflags="-s -w" 以减小镜像尺寸
+安装了 ca-certificates, 这样使用 TLS证书就没问题了
+自动设置了本地时区,这样我们在日志里看到的是北京时间了
+我们看看用这个自动生成的 Dockerfile 构建出的镜像大小
+
+$ docker images | grep hello
+hello     v4    a7c3baed2706   4 seconds ago   7.97MB
+hello     v3    f51e1116be11   8 hours ago     6.61MB
+hello     v2    0dd53f016c93   8 hours ago     6.61MB
+hello     v1    ac0e37173b85   9 hours ago     314MB
+略微大一点,这是因为我们安装了 ca-certificates 和 tzdata。验证一下
+docker run -it --rm hello:v4 ls -l /app
+total 832
+-rwxr-xr-x    1 root     root        851968 Mar  7 08:36 hello
+也是只有 hello 可执行文件,并且文件大小从原来的 1281KB 减到了 851KB。跑一下看看:
+
+$ docker run -it --rm hello:v4
+hello world!

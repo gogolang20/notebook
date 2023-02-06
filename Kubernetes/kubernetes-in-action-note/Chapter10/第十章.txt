@@ -1,0 +1,241 @@
+第十章 StatefulSet: 部署有状态的多副本应用
+
+### 10.1 复制有状态pod
+
+```
+ReplicaSet通过⼀个pod模板创建多个pod副本。这些副本除了它们的名字和IP地址不同外,没有别的差异。如果pod模板⾥描述了⼀个关联到特定持久卷声明pvc的数据卷,那么ReplicaSet的所有副本都将共享这个持久卷声明pvc,也就是绑定到同持久卷声明pvc,也就是绑到同⼀个声明的持久卷pv。
+```
+
+10.1.1 运行每个实例都有单独存储的多副本
+
+```
+如何运⾏⼀个pod的多个副本,让每个pod都有独⽴的存储卷呢？
+```
+
+10.1.2 每个pod都提供稳定的标识
+
+```
+除了上⾯说的存储需求,集群应⽤也会要求每⼀个实例拥有⽣命周期内唯⼀标识。
+为什么⼀些应⽤需要维护⼀个稳定的⽹络标识呢？
+这个需求在有状态的分布式应⽤中很普遍。
+```
+
+### 10.2 了解Statefulset
+
+```
+可以创建⼀个Statefulset资源替代ReplicaSet来运⾏这类pod。它是专门定制的⼀类应⽤,这类应⽤中每⼀个实例都是不可替代的个体,都拥有稳定的名字和状态。
+```
+
+10.2.1 对比Statefulset和ReplicaSet
+
+```
+RelicaSet或ReplicationController管理的pod副本⽐较像⽜,这是因为它们都是⽆状态的,任何时候它们都可以被⼀个全新的pod替换。
+```
+
+10.2.2 提供稳定的网络标识
+
+```
+⼀个Statefulset通常要求你创建⼀个⽤来记录每个pod⽹络标记的headless Service。通过这个Service,每个pod将拥有独⽴的DNS记录,这样集群⾥它的伙伴或者客户端可以通过主机名⽅便地找到它。
+
+当⼀个Statefulset管理的⼀个pod实例消失后(pod所在节点发⽣故障,或有⼈⼿动删除pod),Statefulset会保证重启⼀个新的pod实例替换它,这与ReplicaSet类似。但与ReplicaSet不同的是,新的pod会拥有与之前pod完全⼀致的名称和主机名。
+
+⼀个Statefulset创建的每个pod都有⼀个从零开始的顺序索引,这个会体现在pod的名称和主机名上,同样还会体现在pod对应的固定存储上。
+
+Statefulset在有实例不健康的情况下是不允许做缩容操作的。
+```
+
+10.2.3 为每个有状态实例提供稳定的专属存储
+
+```
+有状态的pod的存储必须是持久的,并且与pod解耦
+```
+
+10.2.4 Statefulset 的保障
+
+一个Statefulset 必须在准确确认 不再运行后,才会去创建它的替换pod
+
+### 10.3 使用 StatefuIset
+
+10.3.1 创建应用和容器镜像
+
+10.3.2 通过 Statefulset 部署应用
+
+```
+为了部署你的应⽤,需要创建两个(或三个)不同类型的对象:
+1 存储你数据⽂件的持久卷(当集群不支持持久卷的动态供应时,需要⼿动创建)
+2 Statefulset必需的⼀个控制Service
+3 Statefulset本身
+```
+
+```
+先部署pv pvc
+使用yaml文件
+
+创建控制Service
+vim /root/kubia-service-headless.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubia
+spec:
+  clusterIP: None #Statefulset的控制Service必须是headless模式
+  selector:
+    app: kubia
+  ports:
+  - name: http
+    port: 80
+
+创建Statefulset详单
+vim /root/kubia-statefulset.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kubia
+spec:
+  serviceName: kubia
+  replicas: 2
+  selector:
+    matchLabels:
+      app: kubia # has to match .spec.template.metadata.labels
+  template:
+    metadata:
+      labels:
+        app: kubia
+    spec:
+      containers:
+      - name: kubia
+        image: luksa/kubia-pet
+        ports:
+        - name: http
+          containerPort: 8080
+        volumeMounts:
+        - name: data
+          mountPath: /var/data
+  volumeClaimTemplates:
+  - metadata:
+      name: data
+    spec:
+      resources:
+        requests:
+          storage: 1Mi
+      accessModes:
+      - ReadWriteOnce
+kubectl create -f kubia-statefulset.yaml
+
+kubectl get po
+第⼆个pod会在第⼀个pod运⾏并且处 于就绪状态后创建。
+
+检查⽣成的有状态pod
+kubectl get po {podName} -o yaml
+
+检查生成的持久卷声明
+kubectl get pvc
+生成的持久卷声明的名称由在volumeClaimTemplate字段中定义的名称和每个pod的名称组成。可以检查声明的YAML⽂件来确认它们符合模板的定义。
+```
+
+10.3.3 使用你的pod
+
+```
+通过API服务器与pod通信
+
+kubectl proxy 
+curl localhost:8001/api/vl/namespaces/default/pods/kubia-0/proxy/ #另开一个终端
+请求会经过两个代理:第⼀个是kubectl代理,第⼆个是把请求代理到pod的API服务器
+
+发送⼀个POST请求到kubia-0 pod的⽰例:
+curl -X POST -d "Hey there! This greeting was submitted to kubia-0." localhost:8001/api/vl/namespaces/default/pods/kubia-O/proxy/
+
+curl localhost:8001/api/vl/namespaces/default/pods/kubia-0/proxy/
+curl localhost:8001/api/vl/namespaces/default/pods/kubia-1/proxy/
+
+删除⼀个有状态pod来检查重新调度的pod是否关联了相同的存储
+kubectl delete po kubia-0
+kubectl get po
+检查⼀下它是否拥有与之前的pod⼀样的标记
+curl localhost:8001/api/vl/namespaces/default/pods/kubia-0/proxy/
+```
+
+```
+通过⼀个普通的⾮headless的Service暴露Statefulset的pod
+vim /root/kubia-service-public.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubia-public
+spec:
+  selector:
+    app: kubia
+  ports:
+  - port: 80
+    targetPort: 8080
+
+通过API服务器访问集群内部的服务
+代理请求到Service的URL路径格式如下:
+/api/vl/namespaces/<namespace>/services/<service name>/proxy/<path>
+curl localhost:8001/api/vl/namespaces/default/services/kubia-public/proxy/
+```
+
+### 10.4 在Statefulset中发现伙伴节点
+
+```
+介绍SRV记录
+SRV记录⽤来指向提供指定服务的服务器的主机名和端⼜号。Kubernetes通过⼀个headless service创建SRV记录来指向pod的主机名。
+
+kubectl run -it srvlookup --image=tutum/dnsutils --rm --restart=Never -- dig SRV kubia.default.svc.cluster.local
+dig SRV kubia.default.svc.cluster.local #进入容器后执行
+```
+
+10.4.1 通过DNS实现伙伴间彼此发现
+
+10.4.2 更新Statefulset
+
+```
+kubectl edit statefulset kubia #另⼀个选择是patch命令
+修改spec.replicas为3,修改spec.template.spec.containers.image属性指向新的镜像(使⽤luksa/kubia-pet-peers替换luksa/kubia-pet)。然后保存⽂件并退出,Statefulset就会更新。
+
+kubectl get po
+kubectl delete po kubia-0 kubia-1 
+
+注意 从Kubernetes 1.7版本开始,Statefulset⽀持与 Deployment和 DaemonSet ⼀样的滚动升级。通过 kubectl explain 获取 Statefulset 的 spec.updateStrategy相关⽂档来获取更多信息。
+```
+
+10.4.3 尝试集群数据存储
+
+```
+通过service往集群数据存储中写⼊数据
+curl -X POST -d "The sun is shining" \ localhost:8001/api/vl/namespaces/default/services/kubia-public/proxy/
+
+curl -X POST -d "The weather is sweet" \ localhost:8001/api/vl/namespaces/default/services/kubia-public/proxy/
+
+从数据存储中读取数据
+curl localhost:8001/api/vl/namespaces/default/services/kubia-public/proxy/
+当⼀个客户端请求到达集群中任意⼀个节点后,它会发现它的所有伙伴节点,然后通过它们收集数据,然后把收集到的所有数据返回给客户端。
+```
+
+### 10.5 了解Statefulset如何处理节点失效
+
+10.5.1 模拟一个节点的网络断开
+
+```
+关闭节点的⽹络适配器
+ifconfig ens33 down
+
+通过Kubernetes管理节点检查节点的状态
+kubectl get node
+kubectl get po
+
+当⼀个pod状态为Unknow时会发⽣什么
+但如果这个pod的未知状态持续⼏分钟后(这个时间是可以配置的),这个pod就会⾃动从节点上驱逐。
+
+kubectl describe po kubia-0 #查看Status信息
+```
+
+10.5.2 手动删除 pod
+
+```
+kubectl delete po kubia-0
+
+强制删除 pod #如果worker节点失联了
+kubectl delete po kubia-0 --force --grace-period 0
+警告 除⾮你确认节点不再运⾏或者不会再可以访问(永远不会再可以访问),否则不要强制删除有状态的pod。
+```

@@ -1,0 +1,281 @@
+#------------------------------------------------#------------------------------------------------#
+docker
+#------------------------------------------------#------------------------------------------------#
+sudo yum remove docker*
+sudo yum install -y yum-utils
+
+#配置docker的yum地址
+sudo yum-config-manager \
+--add-repo \
+http://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo
+
+#安装指定版本
+sudo yum install -y docker-ce-20.10.7 docker-ce-cli-20.10.7 containerd.io-1.4.6
+
+#	启动&开机启动docker
+systemctl enable docker
+
+# docker加速配置
+sudo mkdir -p /etc/docker
+sudo tee /etc/docker/daemon.json <<-'EOF'
+{
+  "registry-mirrors": ["https://82m9ar63.mirror.aliyuncs.com"],
+  "exec-opts": ["native.cgroupdriver=systemd"],
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "100m"
+  },
+  "storage-driver": "overlay2"
+}
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+
+#------------------------------------------------#------------------------------------------------#
+K8S
+#------------------------------------------------#------------------------------------------------#
+1 设置主机名
+k8s-master  k8s-node01  k8s-node02
+
+2 设置主机映射
+192.168.152.163  k8s-master
+192.168.152.164  k8s-node01
+192.168.152.165  k8s-node02
+
+3 时钟同步
+4 关闭selinux
+
+5 关闭交换分区
+swapoff -a
+sed -ri 's/.*swap.*/#&/' /etc/fstab
+
+6 允许 iptables 检查桥接流量
+cat <<EOF | sudo tee /etc/modules-load.d/k8s.conf
+br_netfilter
+EOF
+
+cat <<EOF | sudo tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+sudo sysctl --system
+
+7 配置k8s的yum源地址
+cat <<EOF | sudo tee /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=http://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64
+enabled=1
+gpgcheck=0
+repo_gpgcheck=0
+gpgkey=http://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg
+   http://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
+EOF
+
+#------------------------------------------------#------------------------------------------------#
+                                             保存快照
+#------------------------------------------------#------------------------------------------------#
+master安装 kubelet,kubeadm,kubectl
+sudo yum install -y kubelet-1.20.9 kubeadm-1.20.9 kubectl-1.20.9
+#sudo yum install -y kubelet kubeadm kubectl
+
+启动kubelet 设置开机启动
+systemctl enable kubelet && systemctl start kubelet
+
+
+
+8 初始化节点
+kubeadm init \
+--apiserver-advertise-address=192.168.152.163 \
+--control-plane-endpoint=k8s-master \
+--image-repository registry.aliyuncs.com/google_containers \
+--kubernetes-version v1.20.9 \
+--service-cidr=10.96.0.0/16 \
+--pod-network-cidr=10.244.0.0/16
+
+#apiserver-advertise-address 使用master节点 IP
+#kubernetes-version 要和上面安装的一致
+#------------------------------------------------#------------------------------------------------#
+Your Kubernetes control-plane has initialized successfully!
+
+To start using your cluster, you need to run the following as a regular user:
+
+  mkdir -p $HOME/.kube
+  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+Alternatively, if you are the root user, you can run:
+
+  export KUBECONFIG=/etc/kubernetes/admin.conf
+
+You should now deploy a pod network to the cluster.
+Run "kubectl apply -f [podnetwork].yaml" with one of the options listed at:
+  https://kubernetes.io/docs/concepts/cluster-administration/addons/
+
+You can now join any number of control-plane nodes by copying certificate authorities
+and service account keys on each node and then running the following as root:
+
+  kubeadm join k8s-master:6443 --token 96c5w7.xkqf4fp1pjngcj2q \
+    --discovery-token-ca-cert-hash sha256:5d8ecdae0730a1e201a50cc24f97f965868445044efa00c206bdb1c01d6b84d2 \
+    --control-plane 
+
+Then you can join any number of worker nodes by running the following on each as root:
+
+kubeadm join k8s-master:6443 --token 96c5w7.xkqf4fp1pjngcj2q \
+    --discovery-token-ca-cert-hash sha256:5d8ecdae0730a1e201a50cc24f97f965868445044efa00c206bdb1c01d6b84d2
+#------------------------------------------------#------------------------------------------------#
+
+9 执行提示命令
+  mkdir -p $HOME/.kube
+  sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+10 worker节点加入
+kubeadm join k8s-master:6443 --token 96c5w7.xkqf4fp1pjngcj2q \
+    --discovery-token-ca-cert-hash sha256:5d8ecdae0730a1e201a50cc24f97f965868445044efa00c206bdb1c01d6b84d2
+
+11 安装Calico网络插件
+curl https://docs.projectcalico.org/manifests/calico.yaml -O
+
+kubectl apply -f calico.yaml
+
+#-----------------------------------------------#-----------------------------------------------#
+安装 ingress
+#-----------------------------------------------#-----------------------------------------------#
+官网安装方式:repo地址无法访问
+helm upgrade --install ingress-nginx ingress-nginx \
+  --repo https://kubernetes.github.io/ingress-nginx \
+  --namespace ingress-nginx --create-namespace
+
+
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.1.2/deploy/static/provider/cloud/deploy.yaml
+
+
+安装参考资料
+https://kubernetes.io/
+
+#-----------------------------------------------#-----------------------------------------------#
+Centos7 主机规划
+#-----------------------------------------------#-----------------------------------------------#
+
+1. 设置主机名与时区
+    同步时钟
+    yum install -y ntp
+    #ntpdate ntp[1-7].aliyun.com  七个服务器
+    ntpdate ntp1.aliyun.com
+    clock -w #同步
+    ntpdate time.windows.com #同步windows时间
+
+2. 添加hosts网络主机配置,三台虚拟机都要设置
+192.168.152.141  k8s-master
+192.168.152.143  k8s-node01
+192.168.152.144  k8s-node02
+
+3. 关闭防火墙、selinux,三台虚拟机都要设置,生产环境跳过这一步
+    vim /etc/selinux/config
+
+4. 关闭swap分区
+    vim /etc/fstab #注释 swap 一行
+	swapoff -a
+	sed -ri 's/.*swap.*/#&/' /etc/fstab
+
+5. 安装docker,确保从cgroups均在同一个从groupfs
+
+6. 配置网桥
+cat <<EOF >  /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+EOF
+#sysctl --system
+sysctl -p /etc/sysctl.d/k8s.conf
+
+服务器使用centos7.6以及以上,配置阿里云仓库
+wget -O /etc/yum.repos.d/CentOS-Base.repo https://mirrors.aliyun.com/repo/Centos-7.repo && yum -y  install epel-release
+wget https://mirrors.aliyun.com/docker-ce/linux/centos/docker-ce.repo -O /etc/yum.repos.d/docker.repo
+
+添加阿里云安装源,三个节点都添加
+cat <<EOF > /etc/yum.repos.d/kubernetes.repo
+[kubernetes]
+name=Kubernetes
+baseurl=https://mirrors.aliyun.com/kubernetes/yum/repos/kubernetes-el7-x86_64/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=https://mirrors.aliyun.com/kubernetes/yum/doc/yum-key.gpg https://mirrors.aliyun.com/kubernetes/yum/doc/rpm-package-key.gpg
+EOF
+---------------------------------------------------------------------
+(建议关机保存快照)
+yum install -y kubelet-1.18.0 kubeadm-1.18.0 kubectl-1.18.0 
+//yum install -y kubelet kubeadm kubectl #不加版本号默认安装最新的
+systemctl enable kubelet && systemctl start kubelet
+
+---------------------------------------------------------------------
+---------------------------------------------------------------------
+部署master:在master节点操作
+kubeadm init \
+--apiserver-advertise-address=192.168.152.163 \
+--image-repository registry.aliyuncs.com/google_containers \
+--kubernetes-version v1.18.0 \
+--service-cidr=10.96.0.0/12 \
+--pod-network-cidr=10.244.0.0/16
+#apiserver-advertise-address 使用master节点 IP
+#kubernetes-version 要和上面安装的一致
+
+执行提示的命令
+mkdir -p $HOME/.kube
+sudo cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $(id -u):$(id -g) $HOME/.kube/config
+kubectl get nodes #查看节点
+
+node节点操作,加入集群
+kubeadm join 192.168.152.163:6443 --token ibhubt.f5kh2gpzqnlknx70 \
+    --discovery-token-ca-cert-hash sha256:84c921ea0ddc156ea0d8fb9202e8f49720fc832396a9e097084024f6d1ac957a
+
+如果忘记 master 的token执行:
+kubeadm token list #找回token
+然后node节点执行下方的命令加入集群
+kubeadm join 192.168.152.142:6443 --token o88n5m.e07h1ur7pocunwmu --discovery-token-unsafe-skip-ca-verification
+
+kubeadm token create --print-join-command #重新创建token
+
+---------------------------------------------------------------------
+---------------------------------------------------------------------
+部署CNI 网络插件
+wget https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+kubectl apply -f kube-flannel.yml
+或者:
+kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+
+kubectl get pods -n kube-system
+
+
+
+
+
+#-----------------------------------------------#-----------------------------------------------#
+测试kubernetes集群
+#-----------------------------------------------#-----------------------------------------------#
+kubectl create deployment nginx --image=nginx
+kubectl get pod 
+kubectl expose deployment nginx --port=80 --type=NodePort
+kubectl get pod,svc
+192.168.245.132:31216 #node节点+port
+
+生成一个yaml文件,并且是不运行的
+kubectl create deployment web --image=nginx -o yaml --dry-run > test.yaml
+
+kubectl get deploy #查看名称
+导出生成的yaml文件
+kubectl get deploy nginx -o=yaml --export > test2.yaml
+
+
+#-----------------------------------------------#-----------------------------------------------#
+二进制:参考步骤
+#-----------------------------------------------#-----------------------------------------------#
+基础环境配置相同
+1 为etcd和apiserver自签证书:cfssl ；apiserver自签证书
+2 部署etcd集群:本质是把etcd服务交给systemd管理
+3 部署master组件:kube-apiserver； kube-controller-manager； kube-scheduler； docker； etcd
+4 部署node组件:kubelet; kube-proxy； docker； etcd
+    批准kubelet证书申请并加入集群
+5 部署CNI网络

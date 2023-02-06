@@ -1,0 +1,528 @@
+第六章 卷:将磁盘挂载到容器
+
+需要谨记⼀点,pod中的每个容器都有⾃⼰独⽴的⽂件系统,因为⽂件系统来⾃容器镜像
+
+每个新容器都是通过在构建镜像时加⼊的详细配置⽂件来启动 的。将此与pod中容器重新启动的现象结合起来(也许是因为进程崩 溃,也许是存活探针向Kubernetes发送了容器状态异常的信号),你就 会意识到新容器并不会识别前⼀个容器写⼊⽂件系统内的任何内容,即使新启动的容器运⾏在同⼀个pod中。
+
+### 6.1 介绍卷
+
+6.1.1 卷的应用示例
+
+6.1.2 介绍可用的卷类型
+
+```
+1 emptyDir -- ⽤于存储临时数据的简单空⽬录。
+2 hostPath -- ⽤于将⽬录从⼯作节点的⽂件系统挂载到pod中。
+3 gitRepo -- 通过检出Git仓库的内容来初始化的卷。
+4 nfs -- 挂载到pod中的NFS共享卷。
+5 gcePersistentDisk (Google 高效能型存储磁盘卷)、 awsElastic BlockStore (AmazonWeb 服务弹性块存储卷)、 azureDisk (Microso Azure 磁盘卷) -- 用于挂载云服务商提供的特定存储类型。
+6 cinde,cephfs, iscsi, flocker, glusterfs, quobyte, rbd, flexVolume, vsphere-Volume,photo PersistentDis,scaleIO 用于挂载其他类型的网络存储。
+7 configMap、secret、downwardAPI——⽤于将Kubernetes部分资源和集群信息公开给pod的特殊类型的卷。
+8 persistentVolumeClaim -- 一种使⽤预置或者动态配置的持久存储类型
+
+特殊类型的卷(secret、downwardAPI、configMap),它们不是⽤于存储数据,⽽是⽤于将Kubernetes元数据公开给运⾏在pod中的应⽤程序。
+```
+
+### 6.2 通过卷在容器之间共享数据
+
+6.2.1 使用 emptyDir卷
+
+```
+创建fortune镜像(参考270页步骤)
+或者使⽤笔者已经构建并推送到Docker Hub luksa/Fortune下的镜像。
+vim /root/fortune-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: fortune
+spec:
+  containers:
+  - image: luksa/fortune
+    name: html-generator
+    volumeMounts:
+    - name: html
+      mountPath: /var/htdocs
+  - image: nginx:alpine
+    name: web-server
+    volumeMounts:
+    - name: html
+      mountPath: /usr/share/nginx/html
+      readOnly: true
+    ports:
+    - containerPort: 80
+      protocol: TCP
+  volumes:
+  - name: html
+    emptyDir: {}
+kubectl create -f fortune-pod.yaml
+$ pod/fortune created
+
+kubectl port-forward fortune 8080:80
+$ Forwarding from 127.0.0.1:8080 -> 80
+$ Forwarding from [::1]:8080 -> 80
+
+curl localhost:8080 #另开一个终端,访问
+$ If you think last Tuesday was a drag, wait till you see what happens tomorrow!
+
+kubectl exec -it fortune -c {containerName} -- bash
+eg:kubectl exec -it fortune -- bash
+eg:kubectl exec -it fortune -c web-server -- cat /usr/share/nginx/html/index.html
+
+指定⽤于EMPTYDIR的介质
+将emptyDir的medium设置为Memory
+  volumes:
+  - name: html
+    emptyDir: 
+      medium: Memory #emptyDir 的文件将会存储在内存中
+```
+
+6.2.2 使用 Git 仓库作为存储卷
+
+gitRepo卷基本上也是⼀个emptyDir卷,它通过克隆Git仓库并在pod启动时(但在创建容器之前)检出特定版本来填充数据
+
+**注意** 在创建gitRepo卷后,它并不能和对应repo保持同步。当向Git仓库推送新增的提交时,卷中的⽂件将不会被更新。
+
+```
+从⼀个克隆的Git仓库中运⾏web服务器pod的服务⽂件
+vim /root/gitrepo-volume-pod.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gitrepo-volume-pod
+spec:
+  containers:
+  - image: nginx:alpine
+    name: web-server
+    volumeMounts:
+    - name: html
+      mountPath: /usr/share/nginx/html
+      readOnly: true
+    ports:
+    - containerPort: 80
+      protocol: TCP
+  volumes:
+  - name: html
+    gitRepo:
+      repository: https://github.com/luksa/kubia-website-example.git
+      revision: master
+      directory: . #将repo克隆到卷的根目录
+kubectl create -f gitrepo-volume-pod.yaml
+$ pod/gitrepo-volume-pod created
+```
+
+介绍sidecar容器
+
+Git同步进程不应该运⾏在与Nginx站点服务器相同的容器中,⽽是 在第⼆个容器:sidecar container。它是⼀种容器,增加了对pod主容器 的操作。
+
+**注意** 第18章中的⼀个例⼦包含了类似的Git同步容器,所以可以等读到第18章,再跟着分步说明做这个练习。
+
+### 6.3 访问工作节点文件系统上的文件
+
+6.3.1 介绍hostPath卷
+
+持久性存储,卷的内容存储在特定节点的⽂件系统中
+
+6.3.2 检查使用hostPath卷的系统pod
+
+```
+kubectl get pods --namespace kube-system -o wide
+
+使用 hostPath 卷访问节点日志的 pod
+kubectl describe po {podName} --namespace kube-system
+eg:kubectl describe po kube-flannel-ds-cs56j --namespace kube-system
+$ Volumes:
+$   run:
+     Type:          HostPath (bare host directory volume)
+     Path:          /run/flannel
+     HostPathType:  
+$   cni-plugin:
+     Type:          HostPath (bare host directory volume)
+     Path:          /opt/cni/bin
+     HostPathType:  
+
+提⽰ 请记住仅当需要在节点上读取或写⼊系统⽂件时才使用hostPath,切勿使⽤它们来持久化跨pod的数据。
+```
+
+### 6.4 使用持久化存储
+
+如果数据需要可以从任何集群节点访问,必须将其存储在某种类型的⽹络存储 (NAS)中。
+
+6.4.1 使用 GCE 持久磁盘作为 pod 存储卷
+
+```
+vim /root/mongodb-podgcepd.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mongodb 
+spec:
+  volumes:
+  - name: mongodb-data
+    gcePersistentDisk:
+      pdName: mongodb
+      fsType: ext4
+  containers:
+  - image: mongo
+    name: mongodb
+    volumeMounts:
+    - name: mongodb-data
+      mountPath: /data/db
+    ports:
+    - containerPort: 27017
+      protocol: TCP
+kubectl create -f mongodb-podgcepd.yaml
+$ pod/mongodb created #无法完成创建
+
+kubectl exec -it mongodb -- mongo
+
+#Google Kubernetes Engine参考即可,kubeadm使用下方的演示
+```
+
+```
+提⽰ 如果要使⽤Minikube,就不能使⽤GCE持久磁盘,但是可以部署mongodb-pod-hostpath.yaml
+vim /root/mongodb-pod-hostpath.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mongodb 
+spec:
+  volumes:
+  - name: mongodb-data
+    hostPath:
+      path: /tmp/mongodb
+  containers:
+  - image: mongo
+    name: mongodb
+    volumeMounts:
+    - name: mongodb-data
+      mountPath: /data/db
+    ports:
+    - containerPort: 27017
+      protocol: TCP
+kubectl create -f mongodb-pod-hostpath.yaml
+$ pod/mongodb created
+
+kubectl exec -it mongodb -- mongo
+> use mystore
+$ switched to db mystore
+> db.foo.insert({name:'foo'})
+$ WriteResult({ "nInserted" : 1 })
+> db.foo.find()
+$ { "_id" : ObjectId("61ac650393be91c9489009f9"), "name" : "foo" }
+
+删除pod并重建
+kubectl delete po mongodb #删除
+$ pod "mongodb" deleted
+kubectl create -f mongodb-pod-hostpath.yaml #重建
+kubectl get po -o wide #查看pod被调度到哪个节点上。
+再次进入 查看数据是否丢失
+kubectl exec -it mongodb -- mongo
+> use mystore
+$ switched to db mystore
+> db.foo.find()
+$ { "_id" : ObjectId("61ac650393be91c9489009f9"), "name" : "foo" }
+
+kubectl delete po mongodb #删除
+#完成了MongoDB pod的操作,所以继续清理这个pod,但是不要删除底层的GCE持久磁盘,我们将在本章后⾯再次⽤到。
+```
+
+6.4.2 通过底层持久化存储使用其他类型的卷
+
+```
+mongodb-podaws.yaml #未演示
+```
+
+```
+使⽤NFS卷 
+如果集群是运⾏在⾃有的⼀组服务器上,那么就有⼤量其他可移 植的选项⽤于在卷内挂载外部存储。例如,要挂载⼀个简单的NFS共享,只需指定NFS服务器和共享路径
+vim /root/mongodb-pod-nfs.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mongodb-nfs
+spec:
+  volumes:
+  - name: mongodb-data
+    nfs:
+      server: 1.2.3.4
+      path: /some/path
+  containers:
+  - image: mongo
+    name: mongodb
+    volumeMounts:
+    - name: mongodb-data
+      mountPath: /data/db
+    ports:
+    - containerPort: 27017
+      protocol: TCP
+kubectl create -f mongodb-pod-nfs.yaml
+$ pod/mongodb-nfs created
+
+kubectl delete po mongodb-nfs
+#需要nfs服务器
+```
+
+### 6.5 从底层存储技术解耦pod
+
+6.5.1 介绍持久卷和持久卷声明
+
+在Kubernetes集群中为了使应⽤能够正常请求存储资源,同时避免 处理基础设施细节,引⼊了两个新的资源,分别是持久卷和持久卷声明。
+
+PersistentVolume(持久卷,简称PV)
+
+持久卷声明(PersistentVolumeClaim,简称PVC)
+
+```
+1 通过Kubernetes API服务器创建持久卷并注册
+2 使用的时候先创建持久卷声明,指定所需要的最低容量要求和访问模式
+3 ⽤户将持久卷声明清单提交给Kubernetes API服务器,Kubernetes将找到可匹配的持久卷并将其绑定到持久卷声明。
+```
+
+6.5.2 创建持久卷
+
+```
+vim /root/mongodb-pv-gcepd.yaml
+#未演示
+```
+
+```
+注意 如果在⽤Minikube,请⽤mongodb-pv-hostpath.yaml⽂件创建PV #kubeadm使用该演示
+vim /root/mongodb-pv-hostpath.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongodb-pv
+spec:
+  capacity: 
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+    - ReadOnlyMany
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /tmp/mongodb
+kubectl create -f mongodb-pv-hostpath.yaml
+$ persistentvolume/mongodb-pv created
+
+kubectl get pv -o wide
+$ NAME         CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS        AGE   VOLUMEMODE
+$ mongodb-pv   1Gi        RWO,ROX        Retain           Available     24s   Filesystem
+
+注意 持久卷不属于任何命名空间,它跟节点⼀样是集群层⾯的资源
+```
+
+6.5.3 通过创建持久卷声明来获取持久卷
+
+```
+创建持久卷声明
+vim /root/mongodb-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc 
+spec:
+  resources:
+    requests:
+      storage: 1Gi
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: ""
+kubectl create -f mongodb-pvc.yaml
+$ persistentvolumeclaim/mongodb-pvc created
+
+kubectl get pvc
+NAME          STATUS   VOLUME       CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+mongodb-pvc   Bound    mongodb-pv   1Gi        RWO,ROX                       28s
+
+PVC状态显⽰已与持久卷的mongodb-pv绑定
+
+kubectl get pv
+NAME         CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM                 
+mongodb-pv   1Gi        RWO,ROX        Retain           Bound    default/mongodb-pvc
+持久卷显⽰被绑定在default/mongodb-pvc的声明上,这个default部 分是声明所在的命名空间(在默认命名空间中创建的声明),我们之 前有提到过持久卷是集群范围的,因此不能在特定的命名空间中创 建,但是持久卷声明又只能在特定的命名空间创建,所以持久卷和持久卷声明只能被同⼀命名空间内的pod创建使⽤。
+```
+
+```
+RWO——ReadWriteOnce——仅允许单个节点挂载读写。
+ROX——ReadOnlyMany——允许多个节点挂载只读。
+RWX——ReadWriteMany——允许多个节点挂载读写这个卷。
+
+注意 RWO、ROX、RWX涉及可以同时使⽤卷的⼯作节点的数量⽽并⾮pod的数量。
+```
+
+6.5.4 在pod中使⽤持久卷声明
+
+```
+vim /root/mongodb-pod-pvc.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mongodb 
+spec:
+  containers:
+  - image: mongo
+    name: mongodb
+    volumeMounts:
+    - name: mongodb-data
+      mountPath: /data/db
+    ports:
+    - containerPort: 27017
+      protocol: TCP
+  volumes:
+  - name: mongodb-data
+    persistentVolumeClaim:
+      claimName: mongodb-pvc
+kubectl create -f mongodb-pod-pvc.yaml
+$ pod/mongodb created
+
+kubectl exec -it mongodb -- mongo
+> use mystore
+$ switched to db mystore
+> db.foo.find()
+$ { "_id" : ObjectId("61ac650393be91c9489009f9"), "name" : "foo" }
+符合预期,可以检索之前存储到MongoDB的⽂档。
+#数据依旧没用变化
+```
+
+6.5.5 了解使⽤持久卷和持久卷声明的好处
+
+```
+现在可以在许多不同的Kubernetes集群上使⽤相同的pod和持久卷声明清单,因为它们不涉及任何特定依赖于基础设施的内容。
+```
+
+6.5.6 回收持久卷
+
+```
+先做⼀个快速实验,删除pod和持久卷声明:
+kubectl delete pod mongodb
+$ pod "mongodb" deleted
+kubectl delete pvc mongodb-pvc
+$ persistentvolumeclaim "mongodb-pvc" deleted
+
+再次创建pvc
+kubectl create -f mongodb-pvc.yaml
+$ persistentvolumeclaim/mongodb-pvc created
+
+kubectl get pvc
+NAME          STATUS    VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+mongodb-pvc   Pending                                                     13s
+#Pending
+kubectl get pv
+NAME         CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS     CLAIM               
+mongodb-pv   1Gi        RWO,ROX        Retain           Released   default/mongodb-pvc
+#Released
+
+由于之前已经使⽤过这个卷,所以它可能包含前⼀个声明⼈的数据,如果集群管理员还没来得及清理,那么不应该将这个卷 绑定到全新的声明中。
+```
+
+```
+手动回收持久卷
+通 过 将 persistentVolumeReclaimPolicy 设置为 Retain从⽽通知到Kubernetes,我们希望在创建持久卷后将其持久化,让Kubernetes可以在持久卷从持久卷声明中释放后仍然能保留它的卷和数据内容。
+
+⾃动回收持久卷
+存在两种其他可⾏的回收策略:Recycle 和Delete。第⼀种删除卷的内容并使卷可⽤于再次声明,通过这种⽅式,持久卷可以被不同的持久卷声明和pod反复使⽤
+⽽另⼀边,Delete策略删除底层存储。需要注意当前GCE持久磁盘⽆法使⽤Recycle选项。这种类型的持久卷只⽀持Retain和Delete策略, 其他类型的持久磁盘可能⽀持这些选项,也可能不⽀持这些选项。
+
+提⽰ 可以在现有的持久卷上更改持久卷回收策略。
+```
+
+### 6.6 持久卷的动态卷配置
+
+```
+注意 与持久卷类似,StorageClass资源并⾮命名空间。
+```
+
+6.6.1 通过StorageClass资源定义可⽤存储类型
+
+```
+storageclass-fast-gcepd.yaml #不演示,kubeadm演示下方
+```
+
+```
+注意 如果使⽤ Minikube,请部署⽂件storageclass-fast-hostpath.yaml
+vim /root/storageclass-fast-hostpath.yaml
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: fast
+provisioner: k8s.io/minikube-hostpath
+parameters:
+  type: pd-ssd
+kubectl create -f storageclass-fast-hostpath.yaml
+$ storageclass.storage.k8s.io/fast created
+
+StorageClass资源指定当久卷声明请求此StorageClass时应使⽤哪个 置备程序来提供持久卷。
+```
+
+6.6.2 请求持久卷声明中的存储类
+
+```
+创建⼀个请求特定存储类的PVC定义
+vim /root/mongodb-pvc-dp.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc 
+spec:
+  storageClassName: fast
+  resources:
+    requests:
+      storage: 100Mi
+  accessModes:
+    - ReadWriteOnce
+kubectl delete pvc mongodb-pvc #先删除之前的mongodb-pvc
+$ persistentvolumeclaim "mongodb-pvc" deleted
+kubectl create -f mongodb-pvc-dp.yaml
+$ persistentvolumeclaim/mongodb-pvc created
+
+注意 如果在PVC中引⽤⼀个不存在的存储类,则PV的配置将失败(在PVC上使⽤ kubectl describe 时,将会看到ProvisioningFailed事件)。
+
+kubectl create -f mongodb-pv-hostpath.yaml #删除重新部署pv
+kubectl get pvc mongodb-pvc
+kubectl get pv
+
+storageclass-fast-hostpath.yaml⽂件中定义的存储类是专⽤于Minikube的
+provisioner: k8s.io/minikube-hostpath
+导致演示异常
+```
+
+```
+了解存储类的使⽤
+StorageClasses的好处在于,声明是通过名称引⽤它们的。因此,只要StorageClass名称在所有这些名称中相同,PVC定义便可跨不同集群移植。
+```
+
+6.6.3 不指定存储类的动态配置
+
+```
+kubectl get sc
+NAME   PROVISIONER                RECLAIMPOLICY   VOLUMEBINDINGMODE   ALLOWVOLUMEEXPANSION
+fast   k8s.io/minikube-hostpath   Delete          Immediate           false               
+
+检查默认存储类
+kubectl get sc standard -o yaml #不适用与kubeadm
+```
+
+```
+创建⼀个没有指定存储类别的持久卷声明 #不适用与kubeadm演示
+vim /root/mongodb-pvc-dp-nostorageclass.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongodb-pvc2 
+spec:
+  resources:
+    requests:
+      storage: 100Mi
+  accessModes:
+    - ReadWriteOnce
+kubectl create -f mongodb-pvc-dp-nostorageclass.yaml
+$ persistentvolumeclaim/mongodb-pvc2 created
+```
+
+```
+强制将持久卷声明绑定到预配置的其中⼀个持久卷
+提⽰ 如果希望PVC使⽤预先配置的PV,请将storageClassName显式设置为＂＂
+
+了解动态持久卷供应的全貌
+这将我们带到本章的最后。总⽽⾔之,将持久化存储附加到⼀个容器的最佳⽅式是仅创建PVC(如果需要,可以使⽤明确指定的storgeClassName)和容器(其通过名称引⽤PVC),其他所有内容都由动态持久卷置备程序处理
+```

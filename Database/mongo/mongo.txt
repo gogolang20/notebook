@@ -1,0 +1,111 @@
+下载地址: https://www.mongodb.com/try/download/community
+
+tar xf mongodb-linux-x86_64-rhel70-5.0.7.tgz
+mv mongodb-linux-x86_64-rhel70-5.0.7 mongodb
+mv mongodb /usr/local/
+/usr/local/mongodb/bin
+
+mkdir data/db  logs/mongodb.log
+./mongod  --port=27017  --fork  --logpath=/usr/local/mongodb/logs/mongo.log  --dbpath=/usr/local/mongodb/data
+--port  端口
+--fork  后台运行
+--logpath  日志目录
+--dbpath  数据目录
+
+./mongo  --port=27017 #连接服务端
+> show dbs;
+
+
+配置启动文件
+vim /usr/local/mongodb/bin/mongodb.conf
+	dbpath = /usr/local/mongodb/data/
+	logpath = /usr/local/mongodb/logs/mongodb.log
+	logappend = true
+	port = 27017
+	#bind_ip = 0.0.0.0
+	fork = true
+
+./mongod -f ./mongodb.conf #启动
+./mongod -f ./mongodb.conf --shutdown #有序退出
+
+数据库内关闭
+> use admin 
+switched to db admin
+> db
+admin
+> db.shutdownServer()
+server should be down...
+
+
+#-------------------------------------------------#-------------------------------------------------#
+配置环境变量
+
+vim /etc/profile
+export MONGODB_HOME=/usr/local/mongodb
+export PATH=$PATH:$MONGODB_HOME/bin
+source /etc/profile
+mongod -f /usr/local/mongodb/bin/mongodb.conf 
+
+#-------------------------------------------------#-------------------------------------------------#
+库 database
+集合 collection (表)
+文档 document (行)
+字段 field (列)
+
+
+#-------------------------------------------------#-------------------------------------------------#
+库 集合 文档 操作
+> use test    #使用并创建test库
+> db          #显示当前库
+> db.users.insert({name:'test'})
+> db.dropDatabase();
+{ "ok" : 1 }  #删除成功
+
+
+> db.createCollection('orders')  #创建集合
+{ "ok" : 1 }
+> db.createCollection('products',{max:100,capped:true,size:5000})
+{ "ok" : 1 }
+> show collections;              #集合
+> show tables;                   #集合
+> db.products.drop();            #删除集合
+true
+
+
+> db.users.insert({"name":"tom","age":"23","bir":"2021.04.22"});   #插入单条文档
+WriteResult({ "nInserted" : 1 })
+
+> db.users.insertMany([{"name":"jack_","age":"26","bir":"2021.04.22"},{"name":"dort_","age":"3","bir":"2022.04.22"}]);
+{                                                                  #插入多条文档
+	"acknowledged" : true,
+	"insertedIds" : [
+		ObjectId("6265397e5c7e0652c39c59fa"),
+		ObjectId("6265397e5c7e0652c39c59fb")
+	]
+}
+> db.users.insert([{"name":"tom","age":"23","bir":"2021.04.22"},{"name":"dort","age":"43","bir":"2022.04.22"}]);
+BulkWriteResult({
+	"writeErrors" : [ ],
+	"writeConcernErrors" : [ ],
+	"nInserted" : 2,
+	"nUpserted" : 0,
+	"nMatched" : 0,
+	"nModified" : 0,
+	"nRemoved" : 0,
+	"upserted" : [ ]
+})
+
+> db.users.find();                      #查询所有文档
+
+> db.users.remove({});                  #删除所有文档
+WriteResult({ "nRemoved" : 7 })
+> db.users.remove({"name":"dort"});     #按条件删除文档
+WriteResult({ "nRemoved" : 3 })
+
+> db.orders.insert({name:"test",age:"25"});
+WriteResult({ "nInserted" : 1 })
+> db.orders.find();
+{ "_id" : ObjectId("62653e6a5b36c41feaeba21a"), "name" : "test", "age" : "25" }
+
+
+

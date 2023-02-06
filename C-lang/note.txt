@@ -1,0 +1,11 @@
+socket ==> socket 多线程 ==> socket 线程池
+            pthread_create()
+
+socket ==> socket 多路复用(select) ==> socket select 多线程
+            select()
+
+多路复用 poll
+
+socket ==> socket 多路复用(epoll) ==> socket epoll 多线程
+多路复用 epoll
+

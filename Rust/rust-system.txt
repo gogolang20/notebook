@@ -1,0 +1,29 @@
+
+https://os.phil-opp.com/ # second Edition
+https://os.phil-opp.com/freestanding-rust-binary/
+
+Start System Project
+	cargo new blog_os --bin --edition 2018
+
+
+
+
+
+#-----------------------------------------#-----------------------------------------#
+cargo-config:
+[source.crates-io]
+registry = "https://github.com/rust-lang/crates.io-index"
+
+#[source.crates-io]
+replace-with = 'tuna'
+
+[source.tuna]
+registry = "https://mirrors.tuna.tsinghua.edu.cn/git/crates.io-index.git"
+
+#[net]
+#git-fetch-with-cli = true
+
+
+
+
+

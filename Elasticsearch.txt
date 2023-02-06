@@ -1,0 +1,379 @@
+下载地址: https://www.elastic.co/cn/downloads/elasticsearch
+解压
+tar -zxvf elasticsearch-7.16.2.tar.gz
+
+下载jdk
+https://www.oracle.com/java/technologies/javase/javase8-archive-downloads.html
+解压
+jdk-8u202-linux-i586.tar.gz
+配置环境变量
+vim /etc/profile
+# set java environment
+JAVA_HOME=/opt/jdk1.8.0_152
+PATH=$PATH:$JAVA_HOME/bin
+export JAVA_HOME PATH
+
+java -version
+
+#----------------------------------------#----------------------------------------#
+ES 安装
+#----------------------------------------#----------------------------------------#
+下载地址: https://www.elastic.co/cn/downloads/past-releases#elasticsearch
+wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-7.16.2-linux-x86_64.tar.gz
+下载到 /opt 目录下
+
+配置新用户, 默认es不能使用root启动 !!!
+创建elsearch用户组及elsearch用户:
+groupadd elsearch
+useradd elsearch -g elsearch
+passwd elsearch
+
+更改elasticsearch文件夹及内部文件的所属用户及组为elsearch:elsearch
+cd /opt
+chown -R elsearch:elsearch   elasticsearch-7.16.2
+
+切换到elsearch用户再启动
+su elsearch
+cd /opt/ elasticsearch-7.16.2/bin
+./elasticsearch
+
+
+测试
+curl 'http://localhost:9200/?pretty'
+输出如下内容表示安装正确
+
+{
+  "name" : "node01",
+  "cluster_name" : "elasticsearch",
+  "cluster_uuid" : "-Yrzie5RQPGUhAeNvjM3Dg",
+  "version" : {
+    "number" : "7.16.2",
+    "build_flavor" : "default",
+    "build_type" : "tar",
+    "build_hash" : "2b937c44140b6559905130a8650c64dbd0879cfb",
+    "build_date" : "2021-12-18T19:42:46.604893745Z",
+    "build_snapshot" : false,
+    "lucene_version" : "8.10.1",
+    "minimum_wire_compatibility_version" : "6.8.0",
+    "minimum_index_compatibility_version" : "6.0.0-beta1"
+  },
+  "tagline" : "You Know, for Search"
+}
+
+
+
+https://www.elastic.co/cn/downloads/past-releases/kibana-7-16-2
+wget https://artifacts.elastic.co/downloads/kibana/kibana-7.16.2-linux-x86_64.tar.gz
+chown -R elsearch:elsearch kibana-7.16.2-linux-x86_64
+curl http://localhost:5601
+
+
+使用golang访问es
+根据elasticsearch版本拉取对应的go包: 
+    github.com/elastic/go-elasticsearch 
+    API文档: https://pkg.go.dev/github.com/elastic/go-elasticsearch/v7
+
+package es
+import (
+    "bytes"
+    "context"
+    "encoding/json"
+    "fmt"
+    "github.com/elastic/go-elasticsearch/v6"
+    "log"
+)
+func failOnError(err error, msg string) {
+    if err != nil {
+        log.Fatalf("%s: %s", msg, err)
+    }
+}
+
+
+Index 在索引中创建或更新文档 索引不存在的情况下,会自动创建索引。 默认的type(类型)是doc, 下面是指定doc类型创建添加的。
+
+func Index() {
+    addresses := []string{"http://127.0.0.1:9200", "http://127.0.0.1:9201"}
+    config := elasticsearch.Config{
+        Addresses:             addresses,
+        Username:              "",
+        Password:              "",
+        CloudID:               "",
+        APIKey:                "",
+    }
+    // new client
+    es, err := elasticsearch.NewClient(config)
+    failOnError(err, "Error creating the client")
+    // Index creates or updates a document in an index
+    var buf bytes.Buffer
+    doc := map[string]interface{}{
+        "title": "你看到外面的世界是什么样的？",
+        "content": "外面的世界真的很精彩",
+    }
+    if err := json.NewEncoder(&buf).Encode(doc); err != nil {
+        failOnError(err, "Error encoding doc")
+    }
+    res, err := es.Index("demo", &buf, es.Index.WithDocumentType("doc"))
+    if err != nil {
+        failOnError(err, "Error Index response")
+    }
+    defer res.Body.Close()
+    fmt.Println(res.String())
+}
+
+
+Search 搜索
+func Search() {
+    addresses := []string{"http://127.0.0.1:9200", "http://127.0.0.1:9201"}
+    config := elasticsearch.Config{
+        Addresses:             addresses,
+        Username:              "",
+        Password:              "",
+        CloudID:               "",
+        APIKey:                "",
+    }
+    // new client
+    es, err := elasticsearch.NewClient(config)
+    failOnError(err, "Error creating the client")
+    // info
+    res, err := es.Info()
+    failOnError(err, "Error getting response")
+    fmt.Println(res.String())
+    // search - highlight
+    var buf bytes.Buffer
+    query := map[string]interface{}{
+        "query": map[string]interface{}{
+            "match": map[string]interface{}{
+                "title": "中国",
+            },
+        },
+        "highlight": map[string]interface{}{
+            "pre_tags" : []string{"<font color='red'>"},
+            "post_tags" : []string{"</font>"},
+            "fields" : map[string]interface{}{
+                "title" : map[string]interface{}{},
+            },
+        },
+    }
+    if err := json.NewEncoder(&buf).Encode(query); err != nil {
+        failOnError(err, "Error encoding query")
+    }
+    // Perform the search request.
+    res, err = es.Search(
+        es.Search.WithContext(context.Background()),
+        es.Search.WithIndex("demo"),
+        es.Search.WithBody(&buf),
+        es.Search.WithTrackTotalHits(true),
+        es.Search.WithPretty(),
+    )
+    if err != nil {
+        failOnError(err, "Error getting response")
+    }
+    defer res.Body.Close()
+    fmt.Println(res.String())
+}
+
+
+
+DeleteByQuery 通过匹配条件删除文档
+func DeleteByQuery() {
+    addresses := []string{"http://127.0.0.1:9200", "http://127.0.0.1:9201"}
+    config := elasticsearch.Config{
+        Addresses:             addresses,
+        Username:              "",
+        Password:              "",
+        CloudID:               "",
+        APIKey:                "",
+    }
+    // new client
+    es, err := elasticsearch.NewClient(config)
+    failOnError(err, "Error creating the client")
+    // DeleteByQuery deletes documents matching the provided query
+    var buf bytes.Buffer
+    query := map[string]interface{}{
+        "query": map[string]interface{}{
+            "match": map[string]interface{}{
+                "title": "外面",
+            },
+        },
+    }
+    if err := json.NewEncoder(&buf).Encode(query); err != nil {
+        failOnError(err, "Error encoding query")
+    }
+    index := []string{"demo"}
+    res, err := es.DeleteByQuery(index, &buf)
+    if err != nil {
+        failOnError(err, "Error delete by query response")
+    }
+    defer res.Body.Close()
+    fmt.Println(res.String())
+}
+Delete通过_id删除文档
+func Delete() {
+    addresses := []string{"http://127.0.0.1:9200", "http://127.0.0.1:9201"}
+    config := elasticsearch.Config{
+        Addresses:             addresses,
+        Username:              "",
+        Password:              "",
+        CloudID:               "",
+        APIKey:                "",
+    }
+    // new client
+    es, err := elasticsearch.NewClient(config)
+    failOnError(err, "Error creating the client")
+    // Delete removes a document from the index
+    res, err := es.Delete("demo", "POcKSHIBX-ZyL96-ywQO")
+    if err != nil {
+        failOnError(err, "Error delete by id response")
+    }
+    defer res.Body.Close()
+    fmt.Println(res.String())
+}
+Create 添加文档(需要指定id,id已存在返回409)
+func Create() {
+    addresses := []string{"http://127.0.0.1:9200", "http://127.0.0.1:9201"}
+    config := elasticsearch.Config{
+        Addresses:             addresses,
+        Username:              "",
+        Password:              "",
+        CloudID:               "",
+        APIKey:                "",
+    }
+    // new client
+    es, err := elasticsearch.NewClient(config)
+    failOnError(err, "Error creating the client")
+    // Create creates a new document in the index.
+    // Returns a 409 response when a document with a same ID already exists in the index.
+    var buf bytes.Buffer
+    doc := map[string]interface{}{
+        "title": "你看到外面的世界是什么样的？",
+        "content": "外面的世界真的很精彩",
+    }
+    if err := json.NewEncoder(&buf).Encode(doc); err != nil {
+        failOnError(err, "Error encoding doc")
+    }
+    res, err := es.Create("demo", "esd", &buf, es.Create.WithDocumentType("doc"))
+    if err != nil {
+        failOnError(err, "Error create response")
+    }
+    defer res.Body.Close()
+    fmt.Println(res.String())
+}
+
+
+Get 通过id获取文档
+func Get() {
+    addresses := []string{"http://127.0.0.1:9200", "http://127.0.0.1:9201"}
+    config := elasticsearch.Config{
+        Addresses:             addresses,
+        Username:              "",
+        Password:              "",
+        CloudID:               "",
+        APIKey:                "",
+    }
+    // new client
+    es, err := elasticsearch.NewClient(config)
+    failOnError(err, "Error creating the client")
+    res, err := es.Get("demo", "esd")
+    if err != nil {
+        failOnError(err, "Error get response")
+    }
+    defer res.Body.Close()
+    fmt.Println(res.String())
+}
+Update 通过_id更新文档
+func Update() {
+    addresses := []string{"http://127.0.0.1:9200", "http://127.0.0.1:9201"}
+    config := elasticsearch.Config{
+        Addresses:             addresses,
+        Username:              "",
+        Password:              "",
+        CloudID:               "",
+        APIKey:                "",
+    }
+    // new client
+    es, err := elasticsearch.NewClient(config)
+    failOnError(err, "Error creating the client")
+    // Update updates a document with a script or partial document.
+    var buf bytes.Buffer
+    doc := map[string]interface{}{
+        "doc": map[string]interface{}{
+            "title": "更新你看到外面的世界是什么样的？",
+            "content": "更新外面的世界真的很精彩",
+        },
+    }
+    if err := json.NewEncoder(&buf).Encode(doc); err != nil {
+        failOnError(err, "Error encoding doc")
+    }
+    res, err := es.Update("demo", "esd", &buf, es.Update.WithDocumentType("doc"))
+    if err != nil {
+        failOnError(err, "Error Update response")
+    }
+    defer res.Body.Close()
+    fmt.Println(res.String())
+}
+UpdateByQuery 通过匹配条件更新文档
+func UpdateByQuery() {
+    addresses := []string{"http://127.0.0.1:9200", "http://127.0.0.1:9201"}
+    config := elasticsearch.Config{
+        Addresses:             addresses,
+        Username:              "",
+        Password:              "",
+        CloudID:               "",
+        APIKey:                "",
+    }
+    // new client
+    es, err := elasticsearch.NewClient(config)
+    failOnError(err, "Error creating the client")
+    // UpdateByQuery performs an update on every document in the index without changing the source,
+    // for example to pick up a mapping change.
+    index := []string{"demo"}
+    var buf bytes.Buffer
+    doc := map[string]interface{}{
+        "query": map[string]interface{}{
+            "match": map[string]interface{}{
+                "title": "外面",
+            },
+        },
+        // 根据搜索条件更新title
+        /*
+        "script": map[string]interface{}{
+            "source": "ctx._source['title']='更新你看到外面的世界是什么样的？'",
+        },
+         */
+        // 根据搜索条件更新title、content
+        /*
+        "script": map[string]interface{}{
+            "source": "ctx._source=params",
+            "params": map[string]interface{}{
+                "title": "外面的世界真的很精彩",
+                "content": "你看到外面的世界是什么样的？",
+            },
+            "lang": "painless",
+        },
+         */
+        // 根据搜索条件更新title、content
+        "script": map[string]interface{}{
+            "source": "ctx._source.title=params.title;ctx._source.content=params.content;",
+            "params": map[string]interface{}{
+                "title": "看看外面的世界真的很精彩",
+                "content": "他们和你看到外面的世界是什么样的？",
+            },
+            "lang": "painless",
+        },
+    }
+    if err := json.NewEncoder(&buf).Encode(doc); err != nil {
+        failOnError(err, "Error encoding doc")
+    }
+    res, err := es.UpdateByQuery(
+        index,
+        es.UpdateByQuery.WithDocumentType("doc"),
+        es.UpdateByQuery.WithBody(&buf),
+        es.UpdateByQuery.WithContext(context.Background()),
+        es.UpdateByQuery.WithPretty(),
+        )
+    if err != nil {
+        failOnError(err, "Error Update response")
+    }
+    defer res.Body.Close()
+    fmt.Println(res.String())
+}

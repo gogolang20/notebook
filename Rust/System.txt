@@ -1,0 +1,31 @@
+website grub
+	https://www.gnu.org/software/grub/manual/grub/
+
+C语言编程
+	< Linux/UNIX 系统编程手册 >
+	< Advanced >
+
+GCC
+	-E 预处理完成后停止
+	-S 编译完成后停止
+	-c 汇编完成后停止,还没有链接成可执行文件
+
+
+x64 Assembly
+	< Beginning x64 Assembly Programming >
+	sudo apt update
+	sudo apt install -y build-essential nasm
+
+tools:
+	GCC ( 编译工具 )
+	GDB ( 调试工具 )
+	nasm ( 汇编工具 )
+		https://nasm.us/docs.php
+	makefile ( 组织工具 )
+		https://www.gnu.org/software/make/manual/make.html#Rule-Introduction
+		https://www.tutorialspoint.com/makefile/
+
+
+#-----------------------------------------#-----------------------------------------#
+
+

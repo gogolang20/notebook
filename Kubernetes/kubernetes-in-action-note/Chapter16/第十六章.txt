@@ -1,0 +1,240 @@
+第十六章 高级调度
+
+### 16.1 使用污点和容忍度阻止节点调度到特定节点
+
+```shell
+节点污点 !!!
+pod对于污点的容忍度 !!!
+```
+
+16.1.1 介绍污点和容忍度
+
+```shell
+kubectl describe node k8s-master
+$ Taints:             node-role.kubernetes.io/master:NoSchedule #主节点包含一个污点
+主节点包含⼀个污点,污点包含了⼀个key、value,以及⼀个effect,表现为<key>=<value>:<effect>
+
+kubectl get po -n kube-system
+kubectl describe po kube-proxy-l4x6v -n kube-system #查看Tolerations 
+
+每⼀个污点都可以关联⼀个效果,效果包含了以下三种
+1 NoSchedule表⽰如果pod没有容忍这些污点,pod则不能被调度到包含这些污点的节点上。
+2 PreferNoSchedule是NoSchedule的⼀个宽松的版本,表⽰尽量阻⽌pod被调度到这个节点上,但是如果没有其他节点可以调度,pod依然会被调度到这个节点上。
+3 NoExecute不同于NoSchedule以及PreferNoSchedule,后两者只在调 度期间起作⽤,⽽NoExecute也会影响正在节点上运⾏着的pod。如果 在⼀个节点上添加了NoExecute污点,那些在该节点上运⾏着的pod,如果没有容忍这个NoExecute污点,将会从这个节点去除。
+```
+
+16.1.2 在节点上添加⾃定义污点
+
+```shell
+⾮⽣产环境的pod不能运⾏在⽣ 产环境的节点上。可以通过在⽣产环境的节点上添加污点来满⾜这个要求
+kubectl taint node {node1.k8s} node-type=production:NoSchedule
+eg:kubectl taint node k8s-node02 node-type=production:NoSchedule
+kubectl run test --image busybox --replicas 5 -- sleep 99999 #删除之前的quota
+kubectl get po -o wide
+```
+
+16.1.3 在pod上添加污点容忍度
+
+```shell
+vim /root/production-deployment.yaml
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata: 
+  name: prod
+spec:
+  replicas: 5
+  template:
+    spec:
+      ...
+      tolerations:
+      - key: node-type
+        operator: Equal
+        value: production
+        effect: NoSchedule
+kubectl create -f production-deployment.yaml
+kubectl get po -o wide
+```
+
+16.1.4 了解污点和污点容忍度的使⽤场景
+
+```
+节点可以拥有多个污点信息,⽽pod也可以有多个污点容忍度
+```
+
+### 16.2 使用节点亲缘性将pod调度到特定节点上
+
+```
+节点亲缘性(node affinity)
+
+kubectl describe node k8s-node01
+GKE演示:
+1 failure-domain.beta.kubernetes.io/region表⽰该节点所在的地理地域。
+2 failure-domain.beta.kubernetes.io/zone表⽰该节点所在的可⽤性区域 (availability zone)。
+3 kubernetes.io/hostname很显然是该节点的主机名。
+```
+
+16.2.1 指定强制性节点亲缘性规则
+
+```yaml
+vim /root/kubia-gpu-nodeselector.yaml
+apiVersion: v1
+kind: Pod
+metadata: 
+  name: kubia-gpu
+spec:
+  nodeSelector:
+    gpu: "true"
+  ...
+kubectl create -f kubia-gpu-nodeselector.yaml
+
+节点亲缘性规则
+vim /root/kubia-gpu-nodeaffinity.yaml
+apiVersion: v1
+kind: Pod
+metadata: 
+  name: kubia-gpu
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: gpu
+            operator: In
+            values:
+            - "true"
+kubectl create -f kubia-gpu-nodeaffinity.yaml #还需要添加containers
+```
+
+16.2.2 调度pod时优先考虑某些节点
+
+```yaml
+给node加上标签 #kubeadm集群
+kubectl label node {nodeName} availability-zone=zone1
+kubectl label node {nodeName} share-type=dedicated
+
+kubectl label node k8s-node01 availability-zone=zone1
+kubectl label node k8s-node01 share-type=dedicated
+kubectl label node k8s-node02 availability-zone=zone2
+kubectl label node k8s-node02 share-type=shared
+kubectl get node -L availability-zone -L share-type
+
+vim /root/preferreddeployment.yaml
+apiVersion: extensions/v1
+kind: Deployment
+metadata: 
+  name: pref
+spec:
+  template:
+    ...
+    spec:
+      affinity:
+        nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 80
+          preference:
+            matchExpressions:
+            - key: availability-zone
+              operator: In
+              values:
+              - zone1
+        - weight: 20
+          preference:
+            matchExpressions:
+            - key: share-type
+              operator: In
+              values:
+              - dedicated
+        ...
+kubectl create -f preferreddeployment.yaml
+```
+
+### 16.3 使用pod亲缘性与非亲缘性对pod进行协同部署
+
+16.3.1 使⽤pod间亲缘性将多个pod部署在同⼀个节点上
+
+```yaml
+首先部署后端pod
+kubectl run backend -l app=backend --image busybox -- sleep 999999
+
+前端pod的描述如以下代码清单所⽰
+vim /root/frontend-podaffinity-host.yaml
+apiVersion: extensions/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 5
+  template:
+    ...
+    spec: 
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app: backend
+            ...
+kubectl create -f frontend-podaffinity-host.yaml
+```
+
+16.3.2 将pod部署在同⼀机柜、可⽤性区域或者地理地域
+
+```
+在调度时,默认情况下,标签选择器只有匹配同⼀命名空间 中的pod。但是,可以通过在labelSelector同⼀级添加namespaces字段,实现从其他的命名空间选择pod的功能。
+```
+
+16.3.3 表达pod亲缘性优先级取代强制性要求
+
+```
+apiVersion: extensions/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 5
+  template:
+    ...
+    spec: 
+      affinity:
+        podAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 80
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app: backend
+    containers: ...
+
+
+kubectl get po -o wide
+```
+
+16.3.4 利⽤pod的⾮亲缘性分开调度pod
+
+```
+vim /root/frontend-podantiaffinity-host.yaml
+apiVersion: extensions/v1
+kind: Deployment
+metadata:
+  name: frontend
+spec:
+  replicas: 5
+  template:
+    metadata:
+      labels:
+        app: frontend
+    spec: 
+      affinity:
+        podAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - topologyKey: kubernetes.io/hostname
+            labelSelector:
+              matchLabels:
+                app: frontend
+    containers: ...
+kubectl create -f frontend-podantiaffinity-host.yaml #containers
+kubectl get po -l app=frontend -o wide
+```

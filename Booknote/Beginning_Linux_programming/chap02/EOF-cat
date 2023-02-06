@@ -1,0 +1,6 @@
+cat << EOF > test.txt  
+> this is 
+> second 
+> lines
+> EOF
+

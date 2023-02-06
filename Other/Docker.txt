@@ -1,0 +1,468 @@
+**Docker常用命令**
+docker pull 镜像名<:tags> - 从远程仓库抽取镜像 
+docker images - 查看本地镜像
+docker run 镜像名<:tags> - 创建容器,启动应用
+docker ps - 查看正在运行中的镜像
+docker rm <-f> 容器id - 删除容器
+docker rmi <-f> 镜像名:<tags> - 删除镜像
+
+开启Docker服务
+systemctl start docker
+守护进程重启:sudo systemctl daemon-reload
+重启docker服务:systemctl restart  docker
+关闭docker:systemctl stop docker
+
+运行命令:docker run -p 80:80 -d nginx
+-p 端口映射
+-d 后台运行
+使用虚拟机的IP地址:192.168.101.101:80
+
+**执行 docker info 时出现警告**
+WARNING: bridge-nf-call-iptables is disabled
+WARNING: bridge-nf-call-ip6tables is disabled
+解决办法:
+vim /etc/sysctl.conf
+在文件里添加下面两行代码:
+net.bridge.bridge-nf-call-ip6tables = 1
+net.bridge.bridge-nf-call-iptables = 1
+然后 ESC 退出后 :wq 保存,执行下面代码:
+sysctl -p
+再运行 docker info
+
+
+**查看tomcat容器内部**
+#docker exec -it 容器运行id /bin/bash
+#docker的安装文件位置:cd /var/lib/docker/
+进入容器后:
+cd webapps
+cat /proc/version (查看容器内的Linux系统版本)
+java -version(查看容器内的Java版本)
+exit (退出容器)
+
+**Dockerfile镜像描述文件**
+Dockerfile是一个包含用于组合镜像的命令的文本文档
+Docker通过读取Dockerfile中的指令按步自动生成镜像
+docker build -t 机构/镜像名<:tags> Dockerfile目录 
+
+**Dockerfile自动部署Tomcat应用**
+FROM tomcat:latest
+MAINTAINER mashibing.com
+WORKDIR /usr/local/tomcat/webapps
+ADD docker-web ./docker-web	第一个是要构建dockerfile的文件  第二个是虚拟机的workdir目录下的文件,不存在会自动创建
+FROM :设置基准镜像
+MAINTAINER :当前镜像维护的机构或个人
+WORKDIR :切换工作目录,不存在会自动创建
+ADD :将指定的文件或目录复制到镜像的指定目录下,建议使用绝对路径
+	docker build -t scs/docker_layer:1.0 .
+
+
+镜像分层概念(layer)
+镜像文件是静态的,使用docker run命令运行后会创建一个容器
+演示
+cd /usr/local/images/docker_layer
+vim dockerfile
+编辑文本
+FROM centos
+RUN ["echo","aaaa"]
+RUN ["echo","bbbb"]
+RUN ["echo","cccc"]
+RUN ["echo","ffff"]
+RUN ["echo","gggg"]
+运行命令
+docker build -t scs/docker_layer:1.0 .
+修改文本后再次运行命令
+docker build -t scs/docker_layer:1.1 .
+会使用之前的cache 
+
+dockerfile 基础命令
+FROM 基准镜像
+LABEL & MAINTAINER 说明信息
+WORKDIR 设置工作目录
+ADD & COPY 复制文件
+ENV 设置环境常量
+RUN & CMD & ENTRYPOINT
+RUN 在docker build 命令构建容器时执行命令
+CMD 容器启动后 docker run 执行默认的命令或参数,附加指令 CMD会被忽略
+ENTRYPOINT 容器启动docker run 时执行的命令,一定会被执行
+
+dockerfile 构建redis:演示为主,可以通过docker官方直接拉取redis镜像
+	安装包 + conf文件
+vim Dockerfile
+FROM centos
+RUN yum install -y gcc gcc-c++ net-tools make
+WORKDIR /usr/local
+ADD redis-name  .
+WORKDIR /usr/local/redis/src
+RUN make && make install
+WORKDIR /usr/local/redis
+ADD redis-7000.conf .
+EXPOSE 7000
+CMD redis-server redis-7000.conf
+
+容器间的单向通信:示例
+	docker run -d --name web --link database tomcat
+	docker run -d -it --name database centos /bin/bash
+	docker exec -it dd03df3c3b99 /bin/bash	进入tomcat 容器内部
+	ping  database
+
+容器间基于bridge的双向通信:示例
+	docker run -d -it --name web tomcat
+	docker run -d -it --name database centos /bin/bash
+	docker network ls	查看
+	docker network create -d bridge mybridge	创建一个mybridge 的网络名
+	docker network connect mybridge web	将容器绑定到网桥上
+	docker network connect mybridge database
+	进入容器后可以相互ping web/database
+
+容器间共享数据:两种方式
+	例如容器内部的image是镜像的,如果需要更新数据,如何实现多个容器读取同一个文件
+	方式1 通过设置 -v 挂载宿主机目录(适合容器数量较少)
+	docker run --name 容器名 -v 宿主机路径:容器内挂载路径 镜像名
+	docker run --name t1 -v /usr/webapps:/usr/local/tomcat/webapps  tomcat 
+示例:
+docker run --name t1 -d -p 8000:8080 -v /usr/webapps:/usr/local/tomcat/webapps  tomcat 
+mkdir -p /usr/webapps/test
+cd /usr/webapps/test
+vim index.html 写入 <h1> this is test </h1>
+http://192.168.245.148:8000/test/index.html  查看共享数据显示
+docker run --name t2 -d -p 8001:8080 -v /usr/webapps:/usr/local/tomcat/webapps  tomcat
+再次创建一个容器后 进入对应端口页面查看的信息是相同的
+修改宿主机的index.html文件,网页信息刷新后会修改
+
+	方式2 通过 --volumes-from 共享容器内挂载点
+	创建共享容器
+	docker create --name webpage -v /webapps:tomcat/webapps tomcat /bin/true
+	共享容器挂载点
+	docker run --volumes-from webpage --name t1 -d tomcat
+示例:
+docker create --name webpage -v /usr/webapps:/usr/local/tomcat/webapps tomcat /bin/true
+/bin/true 没有实际意义 主要是占位符
+docker run -p 8002:8080 --volumes-from webpage --name t3 -d tomcat
+docker run -p 8005:8080 --volumes-from webpage --name t5 -d tomcat
+
+
+docker-compose:https://docs.docker.com/compose/
+	单机多容器部署工具
+	通过yml 文件定义多容器如何部署
+
+部署官方案例:https://docs.docker.com/samples/wordpress/
+	cd /usr 
+	mkdir wordpress 
+	cd wordpress
+	vim docker-compose.yml 粘贴官网提供脚本
+	docker-compose up -d   项目文件夹下运行
+	docker ps 可以查看状态
+
+******************************************************************************
+******************************************************************************
+******************************************************************************
+docker 5个基本概念
+	docker daemon
+	docker client
+	docker image
+	docker container
+	docker repo
+
+docker扩展架构
+	容器与系统
+	容器的网络架构
+	容器的编排
+	容器的集群
+	容器的监控
+
+安装docker
+1 uname -a 查看内核版本 3.10以上(含)
+2 yum update 
+3 阿里源安装
+4 systemctl enable docker
+5 docker加速器
+vim /etc/docker/daemon.json
+添加阿里源的网址
+systemctl daemon reload
+systemctl restart docker	开启启动docker
+
+docker run ununtu:16.04 /bin/echo "hello 1907 docker"
+
+journalctl -u docker -l 可以查看报错
+
+
+自定义容器名称
+docker run -it --name Test ubuntu
+
+二者区别
+docker run -itd ubuntu /bin/bash 不会进入到容器内部
+docker run -it ubuntu /bin/bash 输入exit退出,容器也会关闭
+
+docker exec -it ID /bin/bash exec方式进入容器,exit退出,容器不会关闭
+
+docker attach ID attach方式进入容器,exit退出,容器也会关闭
+
+docker rm -f ID/ID/ID 强制删除多个容器
+docker rm -f $(docker ps -a -q) 强制删除所有的容器
+docker rmi -f $(docker images -a -q) 强制删除所有的镜像
+
+docker kill -s KILL ID/Name 杀死一个或多个容器
+
+docker create --name ng2 nginx 创建一个docker容器
+docker ps -a -n 2 创建的信息
+
+docker inspect ID/Name 查看容器内容信息
+
+docker top ID 显示容器内进程信息
+
+docker镜像仓库
+docker镜像管理:
+	查找镜像:docker search image_name
+	拉取镜像:docker pull image_name:version 拉取指定版本镜像,默认拉取最新的镜像
+	镜像列表:docker images/docker image ls -q 镜像大小与仓库不一样,仓库是经过压缩的 
+		本地镜像地址:cd /var/lib/docker
+	镜像导出:docker export ID/docker save name -o newName.tar 指定新名称,保存到当前目录下
+	镜像导入:docker import/docker load
+	删除镜像:docker rmi -f ID	如果ID相同:docker rmi name:tag
+			删除所有镜像:docker rmi -f $(docker image ls -q)
+	镜像标签:docker tag image_ID 镜像源名称/镜像:tag
+	镜像提交:docker push 现有的镜像；现有的容器导出镜像=>push到仓库里
+	构建镜像:docker build/file 镜像创建；docker commit 镜像提交
+
+补充:
+	rename Rename a container
+	diff Inspect changes to files or directories on a container's filesystem
+	stats Display a live stream of container(s) resource usage statistics
+		docker stats ID
+
+docker仓库:存储镜像,推荐官方镜像,STARS多的
+	公共仓库:
+		docker hub创建账号；客户端登录账号；push username/image:tag
+		docker login 登录 docker logout 退出
+		docker push name:tag 推送真实故障,需要使用标准格式
+			1 标准格式:docker push docker_hub_username/image_name:tag
+			2 镜像标签:docker tag docker_hub_username/image_name:tag
+			3 推送镜像:docker push 
+			eg:docker tag xginx:lastest gogolang/nginx:v1
+			docker push gogolang/nginx:v1
+	私有仓库:
+		实际生产过程使用私有仓库:安全；速度快等
+		Docker公司:Docker-registry 私有仓库组件
+			环境搭建:主机规划 
+			1 centos7 192.168.245.151 私有仓库 docker-CE Docker-registry组件
+			2 centos7 192.168.245.153 客户端 docker-CE组件
+			docker search registry
+			docker pull registry
+			docker run -d -v /registry:/home/docker-registry -p 5000:5000 --restart=always --privileged=true --name registry registry:latest
+			-v 逻辑卷	--privileged=true 防止selinux出问题
+			http://192.168.245.151:5000/v2/ 查看是否安装成功:输出{}
+			
+			镜像标签:docker tag nginx:latest localhost/nginx:v2
+			push出现的问题:
+				问题1解决 docker push localhost/nginx:v2
+				问题2解决 docker tag nginx:latest localhost:5000/nginx:v3
+						docker push localhost:5000/nginx:v3 成功后返回一个Hash值
+						(localhost不可以改成IP地址)
+			验证镜像:http://192.168.245.151:5000/v2/_catalog
+			从私有仓库pull镜像:
+				用客户端拉取 私有仓库的镜像
+				/etc/docker/daemon.json 需要添加私有仓库 
+				{ "insecure-registries" : ["192.168.245.151:5000"] }
+				docker pull IP:5000/image_name:tag	docker pull 192.168.245.151:5000/nginx:v3
+			
+		VMware公司:Harbor 企业级开源组件
+			安全问题；标识和管理；LDAP:用户身份验证和管理
+			环境部署:
+			docker-compose 可以离线安装
+			github开源:https://github.com/goharbor/harb
+			wget https://github.com/goharbor/harbor/releases/download/v1.9.4/harbor-offline-installer-v1.9.4.tgz
+				/usr/local 目录下解压缩文件 tar -xvf
+				cd harbor/
+				./prepare
+				./install.sh	提示需要修改 harbor.yml 文件
+				vim harbor.yml
+					hostname: 192.168.245.151  hostname不可以是localhost
+					harbor_admin_password: Harbor12345
+				修改完成重新执行 ./prepare
+				不可以和 Docker-registry 私有仓库 一起安装
+				浏览器输入网址 http://192.168.245.151 admin Harbor12345 可以登录仓库
+	三方仓库:不建议使用
+
+
+Harbor 使用:开机重启后使用 docker-compose up -d 启动Harbor
+	1 登录系统 username password 网址:http://192.168.245.151
+	2 创建项目 GUI web图形交换页面
+		进入页面:项目-->新建项目 输入项目名称test
+		添加用户:在已创建的项目-->成员--> +用户 添加创建好的用户
+		添加仓库:客户端机器
+			配置镜像 vim /etc/docker/daemon.json 
+			{ "insecure-registries" : ["192.168.245.151"] }
+			重启docker 服务
+	3 创建用户
+		进入页面:系统管理-->用户管理-->创建用户
+	4 登录仓库:客户端 
+		docker login 192.168.245.151 (登录添加的用户)
+		仓库IP	username admin01 password Harbor12345
+	5 镜像标签:客户端
+		标记镜像 docker tag local_image_name:tag remote_ip_repository/Project/image_name:tag
+	6 上传镜像:客户端(先登录) 
+		docker tag hello-world:latest 192.168.245.151/test/hello-world:v1
+		docker push 192.168.245.151/test/hello-world:v1
+	7 下载镜像:docker pull 192.168.245.151/test/hello-world:v1
+
+	harbor.yml的配置文件中进行配置
+	阿里云免费生成 ssl 二级域名证书,通过HTTPS
+
+镜像创建！！！
+	镜像结构:
+		数据 layer层
+		元数据 JSON文件
+		docker inspect 镜像的详情
+		千层饼结构:如何将多个镜像层统筹成一个可以运行的容器
+			联合挂载:对内可以把多个目录挂载到一个目录上(甚至可以再不同的文件系统)
+					对外可以显示这些目录的整合形态
+			docker中使用的AUFS文件系统
+
+	镜像提交:docker commit
+		把容器打包成镜像,可以把容器里的数据也打包到镜像中
+		流程:
+			1 下载镜像 ubuntu:18.04	基础镜像	读数据
+				docker run -it ubuntu:18.04 /bin/bash
+				apt-get update
+			2 使用该镜像创建一个容器	R+W	apt-get update
+			3 exit 退出容器
+			4 docker commit 提交容器的副本:
+			docker commit -m="new version" -a="1907" 4b7605842605 1907/ubuntu:new
+			-a 是作者 容器ID(-it进入容器内部显示的) 指定创建镜像的名称
+	镜像构建:
+		docker build:根据自己的需求自定义一个镜像
+		Dockerfile文件:
+		企业级docker build 实战:
+			1 编写 Dockerfile文件
+			2 使用 docker build 命令
+			3 使用 docker run 命令
+			自定义一个 centos7 系统
+			docker pull centos
+			docker run -it centos  /bin/bash
+			cd /
+			pwd
+			echo "hello world">>readme.md
+			cat readme.md 
+			exit
+			cd /home
+			vim dockerfile
+#从哪一个基础镜像构建
+FROM centos
+#定义作者的信息
+MAINTAINER 1907
+#定义一个变量
+ENV newpath /tmp
+#设置登录以后的工作路径 (落脚点)
+WORKDIR $newpath
+#干了什么 (执行你要的操作)
+RUN yum install -y vim
+RUN yum install -y net-tools
+## 如果有更多的需求......RUN
+
+#开发指定的端口
+EXPOSE 80
+EXPOSE 22
+#开发尽量少的端口 安全
+#执行命令
+CMD echo $newpath
+CMD echo "success-------------ok"
+CMD /bin/bash
+			docker build -f dockerfile -t sss/custom_centos:v1 .
+			docker images #可以查看构建完成的镜像
+			docker history sss/custom_centos:v1 #查看构建步骤
+			docker run -it sss/custom_centos:v1 #创建容器 进入到WORKDIR
+			#进入后可以使用 vim 命令,也可以 ping www.baidu.com
+dockerfile执行顺序:内核-->FROM-->yum install -y vim net-tools-->一直到容器创建完成都是read-only状态,启动后进入R+W 进行数据读写
+
+Dockerfile文件指令:(https://docs.docker.com/engine/reference/builder/)
+	FROM 基础镜像的来源
+	RUN 再镜像中执行了什么命令
+	MAINTAINER
+	CMD
+	ENV
+	EXPOSE
+	WORKDIR
+	VOLUME
+	USER
+	ADD
+	COPY
+	ONBUILD
+	ENTRYPOINT
+
+
+阿里云镜像仓库官网:搜索 容器镜像 进入(三方仓库)
+
+	先创建一个命名空间,一个账号可以创建5个命名空间 
+	创建镜像仓库(地域)-->完成后点击管理 
+	设置镜像仓库登录密码 并在客户端登录
+	sudo docker login --username...
+	用户名是账号名 密码是开通服务时设置的密码
+		访问凭证中可以设置密码
+	tag 之后在 push 到仓库
+	可以通过web端查看镜像版本
+	查看镜像分层的结构
+	阿里云镜像仓库镜像下载到本地:查看阿里文档
+
+
+容器的网络:
+	外部访问容器:也叫宿主机访问容器
+		1 端口的映射:容器和宿主机之间进行通信 -p -P
+			-P 随机端口映射,一般测试环境使用
+		2 端口的暴露:Dockerfile-->EXPOSE 80
+		3 常见有5种方式
+			1 宿主机随机端口映射容器所有端口
+			2 宿主机随机端口映射容器指定端口
+			3 宿主机指定端口映射容器指定端口 ！！！
+			4 宿主机随机端口映射到容器指定IP、指定端口
+				docker run -itd -p 172.0.0.10::80 nginx /bin/bash
+			5 宿主机指定端口映射到容器指定IP、指定端口
+				docker run -itd -p 172.0.0.10:8080:80 nginx /bin/bash
+				
+				netstat -lntup查看端口情况
+
+				docker底层网络原理通过iptables实现
+					执行docker run -d -p 自动添加一条 NAT 规则
+					iptables -t nat -L	查看规则
+					iptables -t nat -L -n
+
+				随机端口映射原理
+					随机端口范围内核参数 -P
+					docker run -P -d nginx
+					sysctl -a | grep port | grep range
+
+				查看容器端口
+				docker port CONTAINER_ID
+
+	容器访问容器:也叫容器的互联
+		创建一个桥接方式的自定义网络:docker network create -d bridge network_name (-d表示网络类型)
+		docker run -itd -p 127.0.0.1:81:80 --name name1 --network anet centos
+		docker run -itd -p 127.0.0.1:82:80 --name name2 --network anet centos
+		进入容器相互ping 通
+		--name Assign a name to the container
+		
+		docker network ls 查看docker网络模式
+		安装rancher 
+		docker run -d --restart=always -p 8080:8080 rancher/server
+		浏览器输入 IP:port 出现对应界面
+		
+		容器互通
+		docker network create -d bridge anet
+		docker run -itd -p 127.0.0.1:81:80 --name nginx --network anet centos
+		docker run -itd -p 127.0.0.1:82:80 --name redis --network anet centos
+		进入容器内部可以相互 ping通另一个容器
+		docker inspetc container_ID 查看对应容器的IP地址
+		--name Assign a name to the container
+		
+	容器网络的几种模式
+		1 host模式 --net=host 指定
+			容器不会虚拟出IP 用的是宿主机的IP和端口
+		2 container模式 --net
+			和bridge模式不同,container模式下容器之间公用一张虚拟处理的eth0网卡
+		3 none模式
+			没有网卡 没有IP 没有路由信息 只有lo
+		4 bridge模式:默认模式
+			iptables nat 给docker内部的各个容器分配不同的IP,每个容器都会虚拟出一张eth0网卡
+		5 自定义网络
+
+
+

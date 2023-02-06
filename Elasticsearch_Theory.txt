@@ -1,0 +1,118 @@
+# Elasticsearch 
+
+环境安装 演示 7.10。0版本
+	1 安装Java环境: 最好是Java8、11、14: 本次建议14
+	2 安装 Elasticsearch
+	3 安装 Kibana
+	4 安装 Elasticsearch-Head 插件
+
+
+Elasticsearch 目录:
+	bin: 可执行脚本, 包括启动Elasticsearch 服务
+	config: 配置文件目录
+	lib: 依赖的Java库
+	data: 生成环境必须修改存储路径！！！
+	logs: 生成环境必须修改存储路径！！！
+	modules: 包含的所以模块,如Cluster
+	plugins: 已经安装的插件
+	jdk/jdk.app: 7.0后才有,自带的Java环境
+
+启动Elasticsearch 单节点服务:
+	Linux:
+	cd elasticsearch/bin 
+	./elasticsearch -d
+访问地址:http://localhost:9200
+
+
+可以一个机器启动多个elasticsearch节点(生产环境不允许！！！),或者
+多个项目应用启动一个elasticsearch节点(由于参数配置原因,可能会出问题)
+建议本机多个项目启动单个节点
+
+
+安装 Kibana:官网下载
+启动 Kibana:需要先启动 Elasticsearch
+	cd Kibana/bin
+	./Kibana
+
+
+安装 Elasticsearch-Head 插件
+安装nodejs:nodejs.org
+node -v
+
+安装grunt:npm install -g grunt-cli	-g表示全局
+grunt -version
+
+1 下载 Head 插件:https://github.com/mobz/elasticsearch-head
+2 下载完成后解压,打开elasticsearch-head-master文件夹,修改
+Gruntfile.js文件,添加 hostname:'*' 到connect server options{} 中
+3 输入cd elasticsearch-head
+	npm install 
+4 输入 npm run start 启动服务
+5 验证 localhost:9100 安装完成
+6 如果无法发现 ES节点,尝试再ES配置文件中设置允许跨域
+http.cors.enabled:true
+http.cors.allow-origin:"*"
+
+
+
+
+java环境变量配置
+wget https://download.java.net/openjdk/jdk11/ri/openjdk-11+28_linux-x64_bin.tar.gz
+vim /etc/profile
+vim .bashrc
+    export JAVA_HOME=/usr/
+    export PATH=$PATH:$JAVA_HOME/bin
+    export CLASSPATH=.
+    #:$JAVA_HOME/lib/dt.jar:$JAVA_HOME/lib/tools.jar
+source /etc/profile
+source .bashrc
+
+
+### Elasticsearch 核心概念
+lucene简介
+Elasticsearch 概念
+集群 索引 分片和文档
+倒排索引深入解读
+
+
+什么是搜索引擎？
+1 全文搜索引擎
+2 垂直搜索引擎:有明确搜索目的
+
+搜索引擎应该具备哪些要求？
+1 查询速度快:高效的压缩算法；快速的编码和解码速度
+2 结果准确:BN25；TF-IDF
+3 检索结果丰富:召回率
+
+如何实现快速查询-->索引
+1 帮助快速检索
+2 以数据结构为载体
+3 以文件的形式落地
+
+数据库的组成结构
+客户端
+服务端:连接器	分析器	优化器 执行器 缓存
+存储引擎
+
+全文检索
+索引系统通过扫描文章的每一个词,对其创建索引,指明再文章中出现的次数和位置,当用户查询时,索引系统就会根据事先建立的索引进行查找,并将查找的结果反馈给用户的检索方式
+
+
+### 倒排索引！！！
+
+
+倒排索引:
+term index 词项索引；2 3
+term dictionary 词项字典；2 3
+posting list 倒排表:1 2 
+	1 int有序数组:存储了匹配某个term的所有id
+		Roaring Bitmaps
+		Frame Of Reference
+	2 tip:词典索引 存放前缀后缀指针,需要内存加载
+	  tim:后缀词块 倒排表指针
+	  doc:倒排表 词频
+	3 极大的节省内存,FST压缩倍率最高可以达到20倍,性能不如HashMap但是也很不错
+
+倒排表的压缩算法:
+    Frame Of Reference
+    Roaring Bitmaps

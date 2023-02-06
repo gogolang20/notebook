@@ -1,0 +1,33 @@
+# apt-get install -y gdb
+gdb hello
+> list
+> run
+> disassemble main
+> x/s 0x601030 # msg memory address
+> x/c 0x601030 
+> x/13c 0x601030
+> x/13d 0x601030
+> x/13x 0x601030
+> x/13c &msg
+> x/2x 0x004004e0
+> break main
+> info registers
+> step
+
+set disassembly-flavor intel
+
+# Some Additional GDB Commands
+disable breakpoint number
+enable breakpoint number 
+delete breakpoint number
+
+continue or c: Continue execution until next breakpoint.
+step or s: Step into the current line, eventually jumping into the called function.
+next or n: Step over the current line and stop at the next line.
+help or h: Show help.
+tui enable: Enable a simple text user interface; to disable, use tui disable 
+print or p: Print the value of a variable, register, and so on.
+Here are some examples:
+	Print rax: p $rax
+	Print rax in binary: p/t $rax
+	Print rax in hexadecimal: p/x $rax

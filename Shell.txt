@@ -1,0 +1,673 @@
+#---------------------------------------#---------------------------------------#
+#---------------------------------------#---------------------------------------#
+#---------------------------------------#---------------------------------------#
+cat /etc/shells #查看shell解析器 bash是一种解析器
+bash #可以新开启一个子进程
+
+#=============================================
+#! /bin/bash  
+echo “hello world!”
+
+#运行命令方式一
+/bin/bash name.sh
+#运行命令方式二
+chmod o+x name.sh  
+./name.sh
+#运行命令方式三
+source name.sh
+
+
+#---------------------------------------#---------------------------------------#
+特殊变量
+#---------------------------------------#---------------------------------------#
+env        #查看环境变量
+export     #配置环境变量
+export -n  #变量还原成临时变量
+set        #查看设置的临时变量
+unset      #取消临时变量
+
+stty -echo //关闭回显
+stty echo  //打开回显
+&          //程序或脚本后台运行
+
+
+a=10
+echo $a
+export a
+bash
+pstree
+export -n a
+
+环境变量
+echo $LANG #语言
+> zh_CN.UTF-8
+echo $PATH
+echo $SHELL
+> /bin/zsh
+echo $UID #当前用户的ID
+> 501
+echo $USER
+> sunchaocheng
+echo $PS1
+> %n@%m %1~ %# 
+echo $PS2
+%_> 
+
+
+a=10
+echo $a
+10
+unset a
+
+date
+> 2022年 8月23日 星期二 09时03分58秒 CST
+abc=`date`
+echo $abc
+> 2022年 8月23日 星期二 09时31分18秒 CST
+echo "$abc"
+> 2022年 8月23日 星期二 09时32分29秒 CST
+echo '$abc'
+> $abc
+unset abc
+
+
+"" 界定范围
+'' 界定范围,可以屏蔽特殊符号
+`` 获取指令的结果
+abc=`date` 等价于 abc=$(date)
+
+
+#---------------------------------------#---------------------------------------#
+#---------------------------------------#---------------------------------------#
+查看当前PID:$$
+    echo $BASHPID #$$ 优先级高于|,$BASHPID低于|
+
+#! /bin/zsh
+echo $1  #脚本后的第一个参数
+echo $2  #脚本后的第二个参数
+echo $3  #脚本后的第三个参数
+echo $$  #当前脚步进程号
+echo $#  #位置变量的个数
+echo $*  #所有位置变量
+echo $?  #上一条指令的结果,0正常,非0是异常
+echo $0  #执行脚本的名字 #echo $"Usage $0 {start|stop}"
+echo $!  #最后一个放入后台的进程号,可以用 sleep 1000 & 测试
+#启动 zsh zzzz.sh a b c
+
+
+#---------------------------------------#---------------------------------------#
+Shell中的运算
+#---------------------------------------#---------------------------------------#
+a=10
+
+1 expr
+expr 1 + 1   或者  expr $a + 1
+expr 1 - 1
+expr 1 \* 1
+expr 1 / 1
+expr 1 % 1
+
+2 $[] 或者 $(())
+echo $[1+2]  或者  echo $[a-2]
+echo $[1-2]       echo $[a-a]
+echo $[1*2]
+echo $[1/2]
+echo $[1%2]
+
+3 let  #echo $a 查看结果
+let a++
+let a--
+let a*=10
+let a/=10
+
+4 bc (可以计算小数)
+echo "1+1.1" | bc
+echo "10/3" | bc          #3
+echo "scale=4;10/3" | bc  #3.3333
+
+
+#---------------------------------------#---------------------------------------#
+条件测试 && 逻辑运算符
+#---------------------------------------#---------------------------------------#
+对文件测试
+-z  判断变量是否为空 (-n 测试时,变量加引号)
+-e  判断是否存在对象
+-d  判断目录是否存在
+-f  判断文件是否存在
+-r  是否有读权限(root无效)
+-w  是否有写权限(root无效)
+-x  是否有执行权限
+
+a=
+[ -z "$a" ] # -z 判断$a是否为空
+echo $?
+
+a=10
+[ -z "$a" ]
+echo $?
+
+[ -e /opt/abc ]
+[ -d /opt/abc ]
+[ -f /opt/abc ] && $?
+[ -r /opt/abc ]
+[ -w /opt/abc ]
+[ -x /opt/abc ]
+
+#---------------------------------------#
+-eq   == Equal 
+-ne   != Not Equal 
+-gt   > Greater Than 
+-lt   < Less Than 
+-ge   >= Greater than or Equal to 
+-le   <= Less than or Equal to
+
+[ 0123 == 123 ]
+echo $?
+
+[ 0123 -eq 123 ]
+echo $?
+
+#---------------------------------------#
+&&    逻辑与判断
+||    逻辑或判断
+;     前后逻辑无关联
+
+[ $USER == root ] && echo $?
+[ $USER != root ] && echo $?
+[ $USER == root ] || echo $?
+[ $USER != root ] || echo $?
+
+
+#---------------------------------------#---------------------------------------#
+分支 if for while case && Function
+#---------------------------------------#---------------------------------------#
+1 if
+if 条件测试 ; then
+	命令序列
+fi
+
+
+if 条件测试 ; then
+	命令序列1
+else
+	命令序列2
+fi
+
+
+if 条件测试 ; then
+	命令序列1
+elif 条件测试 ; then
+	命令序列2
+else
+	命令序列3
+fi
+
+#---------------------------------------#
+2 for
+for 变量名 in 值列表
+do
+	执行命令
+done
+
+#! /bin/bash
+for i in {1..10}
+do
+	echo $i $RANDOM
+done
+
+#! /bin/bash
+a=10
+for i in $(seq $a)
+do
+	echo $i $RANDOM
+done
+
+#! /bin/bash
+for i in {1..15}
+do
+	ping -c 3 -i 0.2 -W 192.168.0.$i &> /dev/null
+	if [ $? -eq 0 ]; then
+		echo "192.168.0.$i ok"
+	else
+		echo "192.168.0.$i fail"
+	fi
+done
+
+#---------------------------------------#
+3 while
+while 条件测试
+do
+	任务序列
+done
+
+while :
+do
+	任务序列
+done
+
+x=$[RAnDOM%101]
+a=0
+while :
+do
+	let a++
+	read -p "请输入一个数(0-100)" n
+	if [ $x -eq $n ]; then
+		echo "猜对了！ 猜了%a次"
+		exit
+	elif [ $n -lt $x ]; then
+		echo "猜小了！"
+	else
+		echo "猜大了！"
+	fi
+done
+
+#---------------------------------------#
+4 case
+case 变量 in
+模式1)
+	命令序列1;;
+模式2)
+	命令序列2;;
+*)
+	命令序列3
+esac
+
+case $1 in
+aa|a)
+	echo aaaa;;
+bb)
+	echo bbbb;;
+*)
+	echo "aa|bb"
+esac
+
+#---------------------------------------#
+5 Function
+格式一
+	function 函数名 { 命令序列 }
+
+格式一
+	函数名() { 命令序列 }
+
+Color() {
+	echo -e "\033[$1m$2 \033[0m"
+}
+Color 31 abcdef
+Color 32 abcdef
+Color 33 abcdef
+Color 34 abcdef
+Color 35 abcdef
+Color 36 abcdef
+
+myping() {
+	ping -c1 -W1 $1 &> /dev/null
+	if [ $? -eq 0 ]; then
+		echo "$1 is up"
+	else
+		echo "$1 is down"
+	fi
+}
+for i in {1..254}
+do
+	myping 192.168.4.$i &
+done
+wait
+
+Fork炸弹:类似格式
+#! /bin/bash
+.() {
+.|. &
+}
+.
+
+#---------------------------------------#
+1-20 找出6的倍数并分别加10
+#! /bin/bash
+for i in {1..20}
+do
+	x=$[i%6]
+	[ $x -eq 0 ] && echo $[i+10]
+	continue
+done
+
+#---------------------------------------#
+#! /bin/bash
+x=0
+while :
+do
+	read -p "请输入数字(0是结束)" n
+	[ -z $n ] || [ $n -eq 0 ] && break
+	let x+=n
+done
+echo "所有数字之和是$x"
+
+#---------------------------------------#---------------------------------------#
+字符操作
+#---------------------------------------#---------------------------------------#
+1 字符串截取
+str=abcdefg
+echo ${str:2:3}    # 截取从index=2开始(包含2) 往后三个字母(index从0开始)
+> cde
+
+字符串拼接
+x=a
+y=b
+xx=$x$y
+echo $xx
+> ab
+x=c
+xx=$xx$x
+echo $xx
+> abc
+
+
+2 字符串替换
+echo ${变量名/old/new}      #替换一个
+echo ${变量名//old/new}     #替换所有
+
+str=aabbcc
+echo ${str/aa/99}    #临时替换
+echo ${str/b/9}
+echo ${str//b/9}
+
+
+3 字符串删除
+#   从左往右删除
+%   从右往左删除
+
+str=`head -1 /etc/passwd`
+echo ${str#root}
+echo ${str##*root}
+
+echo ${str%bash}
+echo ${str%%:*}
+
+定义变量初始值
+echo ${变量名:-初始值}
+
+str=
+echo ${str:-123}
+echo $str
+> 123
+
+#---------------------------------------#---------------------------------------#
+正则表达式 
+#---------------------------------------#---------------------------------------#
+正则符号
+^                   匹配行首
+$                   匹配行尾
+[]                  集合,匹配集合中的任意字符
+[^]                 对集合取反
+.                   匹配任意单个字符
+*                   匹配前一个字符任意次数(*不允许单独使用)
+\{n,m\}             匹配前一个字符n到m次
+\{n\}               匹配前一个字符n次
+\{n,\}              匹配前一个字符n次及以上
+\{\}                保留
+
+[0-9]               匹配任意数字
+[a-z]               匹配任意小写字母
+[A-Z]               匹配任意大写字母
+[a-Z]               匹配所有字母
+
+head -2 /etc/passwd > txt
+grep ^root txt
+grep bash$ txt
+grep ^$           匹配空行
+grep [rot] txt
+grep [^rot] txt
+grep bas[hgs] txt
+grep [a-Z] txt
+grep roo. txt
+grep roo.. txt
+grep ro* txt
+grep ".*" txt     匹配任意,双引号做隔离
+
+grep "o\{2,3\}t" txt
+grep "ro\{2,3\}t" txt
+
+grep "ro\{2\}t" txt
+grep "ro\{3\}t" txt
+
+grep "ro\{1,\}t" txt
+
+
+#---------------------------------------#
+扩展正则列表
++                   最少匹配一次
+?                   最多匹配一次
+{n,m}               匹配n到m次
+()                  组合成整体,保留
+|                   或者
+\b                  单词边界;空 空格 tab 特殊符号
+
+grep -E "ro+t" txt  #grep原生不支持扩展正则,需要 -E 选项
+egrep "ro+t" txt
+egrep "ro?t" txt
+egrep "ro{0,1}" txt
+
+egrep "r|o|t" txt
+egrep "\bbin\b" txt
+
+#---------------------------------------#---------------------------------------#
+Sed
+#---------------------------------------#---------------------------------------#
+使用方法
+一: 前置命令 | sed 选项 (定址符)指令
+二: sed 选项 (定址符)指令 文本
+
+选项:
+-n 屏蔽默认输出
+-r 支持扩展正则
+-i 写入文件
+
+指令
+p 输出指定内容
+d 删除
+s 替换
+a 行后追加,内容在下一行
+i 行前添加,内容在上一行
+c 替换行
+
+#------------------------------------------------------------------------------#
+cat /etc/passwd > testlog.log #测试文本生成
+df | sed -n '1p'
+sed 'p' testlog.log
+sed -n 'p' testlog.log
+sed -n '1p' testlog.log #输出第1行
+sed -n '2p' testlog.log #输出第2行
+sed -n '1,2p' testlog.log #输出1到2行
+sed -n '1,3p' testlog.log #输出1到3行
+sed -n '2,+4p' testlog.log #输出第2行,以及后面的4行
+sed -n '2p;4p' testlog.log #输出第2行,第4行
+sed -n '1~2p' testlog.log #输出第1行后间隔2行才输出一次,也就是1357
+
+sed -n '/^root/p' testlog.log #正则匹配查找内容
+sed -n '/bash$/p' testlog.log
+
+sed -n '$=' testlog.log #显示最后一行行号
+sed -n '=' testlog.log #显示所有行号
+
+#------------------------------------------------------------------------------#
+#定址符相同
+sed '1d'  testlog.log
+sed -r '/bash|nologin/d' testlog.log 
+sed -i '/^$/d' testlog.log #删除所有空行
+
+#------------------------------------------------------------------------------#
+sed 's/old/new/'
+vim test.txt #测试文本
+2017 2011 2018
+2017 2017 2024
+2017 2017 2017
+
+sed 's/2017/AAAA/' test.txt 
+sed 's/2017/AAAA/g' test.txt
+sed 's/2017/AAAA/3' test.txt
+sed '3s/2017/AAAA/g' test.txt
+sed '3s/2017/AAAA/2;3s/2017/AAAA/2' test.txt
+
+sed 's#/bin/bash#/sbin/sh#' test.txt #sed的替换符号 / 可以修改成 #
+sed 's$/bin/bash$/sbin/sh$' test.txt #同上
+
+sed -n 's/root/8888/p' testlog.log # p表示显示更换的内容
+sed -n '4,7s/^/#/p' testlog.log #加注释
+sed -n 's/^#an/an/p' testlog.log #去注释
+
+
+vim test2.txt
+aaa b7bb CCC
+xxx y9yy ZZZ
+
+sed 's/.//2' test2.txt
+sed 's/.$//' test2.txt
+sed 's/.//2;s/.$//' test2.txt #删除第二和最后一个字符
+sed 's/[0-9]//g' test2.txt #删除所以数字
+
+egrep "(bin:/){2}" testlog.log #用 () 保留,划分范围
+sed -r 's/^(.)(.*)(.)$/\3\2\1/' test2.txt #将首尾字符交换
+sed -r 's/([A-Z])/[\1]/g' test2.txt
+
+vim test3.txt
+AAA
+BBB
+CCC
+
+sed 'a 888' test3.txt
+sed '1a 888' test3.txt
+sed '/A/a 888' test3.txt
+sed '1,2a 888' test3.txt
+sed 'i 888' test3.txt
+sed '3i 888' test3.txt
+sed '1c 888' test3.txt
+
+#---------------------------------------#---------------------------------------#
+Awk
+#---------------------------------------#---------------------------------------#
+主要用法
+格式一: 前置命令 | awk [选项] '[条件]{指令}'
+格式二: awk [选项] '[条件]{指令}' 文件
+#print 是最常用 指令
+#多条语句可以分号分隔
+-F 定义分隔符
+
+cat test.txt #演示文本
+hello the world
+welcome to beijing
+
+awk '{print}' test.txt #输出文档所有内容
+awk '{print $1}' test.txt #输出文档每行第1列,默认用空格做分隔符
+awk '{print $1,$3}' test.txt #输出文档每行第1列,第3列
+
+head -1 /etc/passwd > test2.txt #准备新素材
+awk '{print $2}' test2.txt #无显示,当前文档一整行算一列
+awk -F: '{print $5}' test2.txt #以 : 为分隔符,显示第5列
+awk -F: '{print $7}' test2.txt #以 : 为分隔符,显示第7列
+
+awk -F[:/] '{print $9}' test2.txt #打印 bin
+
+awk内置变量:NR行  NF列  $1 $2 $3 ... $0代表所有列
+awk -F[:/] '{print NR}' test2.txt
+awk -F[:/] '{print NF}' test2.txt
+awk -F[:/] '{print NR,NF}' test2.txt
+
+awk '{print "第"NR"行有"NF"列"}' test.txt
+awk '/^w/{print "第"NR"行有"NF"列"}' test.txt #正则
+awk '/g$/{print "第"NR"行有"NF"列"}' test.txt #正则
+ifconfig ens32 | awk '/RX p/{print "当前网卡接收字节"$5}'
+
+逐行任务
+awk [选项] 'BEGIN{指令} {指令} END{指令}' 文件 #前置任务 逐行任务 结束任务
+BEGIN任务  执行一次
+逐行任务  执行多次,与文本有关
+END任务  执行一次
+awk 'BEGIN{print "123"} {print } END{print "789"}' test.txt 
+
+head -5 /etc/passwd > test3.txt
+awk -F:  'BEGIN{print "User\tUID\tHome"} {print $1"\t"$3"\t"$6} END{print "total "NR,"line..."}' test3.txt 
+
+awk处理条件
+1 正则  ~包含  ~!不包含
+awk -F: '/root/' test3.txt #省略 print
+awk -F: '$1~/root/' test3.txt #包含
+awk -F: '$1!~/root/' test3.txt #取反
+awk -F: '$7!~/nologin$/{print $1,$7}' test3.txt
+
+2 使用数值/字符串比较设置条件 == != >= <= > <
+awk 'NR==5{print}' test3.txt 
+awk 'NR!=5' test3.txt #省略 print
+awk -F: '$3==0' test3.txt
+awk -F: '$1=="root"' test3.txt #root作为常量要在""范围内
+
+3 逻辑符号 && ||
+awk -F: '$3>10 && $3<1000' /etc/passwd
+awk -F: '$3>10 || $3<1000' /etc/passwd
+
+4 运算
+seq 100 | awk '$1%7==0||$1~/7/'
+
+
+案例
+vim testbash.sh
+#! /bin/bash
+u=`awk -F: '/bash$/{print $1}' /etc/passwd`
+for i in $u
+do
+	grep $i /etc/shadow | awk -F: '{print $1 " --> " $2}'
+done
+
+#---------------------------------------#---------------------------------------#
+
+awk '{a[$1]++} END{for(i in a){print i,a[i]}}' test... | sort
+
+yum install -y httpd
+systemctl start httpd
+echo 123 > /var/www/html/index.html
+
+curl http://localhost/index.html
+
+cat /var/log/httpd/access_log
+
+yum install -y httpd-tools
+ab -c 1 -n 10000 http://localhost/index.html #模仿攻击
+
+
+
+
+
+#---------------------------------------#---------------------------------------#
+备份MySQL
+#---------------------------------------#---------------------------------------#
+#! /bin/bash
+#auto bakcup mysql db
+#2021.6.25
+
+bak_DIR=/data/backip/`date +%Y%m%d`  #反引号内部是解析成命令执行
+MYSQLDB=discuz
+MYSQLUSR=backup
+MYSQLPW=123456
+MYSQlCMD=/usr/bin/mysqldump
+
+if [ $UID -ne 0 ]; then
+    echo " must to  be use root  for exec shell "
+    exit
+fi
+if [ ! -d $bak_DIR ]; then   #$UID  打印当前用户ID
+    mkdir -p $bak_DIR
+    echo "create success "
+else
+    echo " this $bak_DIR is exists"
+fi
+
+#myslqdump`-ubackup -p 123456 discuz > $bak_DIR/discuz.qsl`
+$MYSQlCMD -u$MYSQLUSR -p$MYSQLPW -d$MYSQLDB > $bak_DIR/$MYSQLDB.qsl
+
+if [ $? -wq 0 ]; then
+    echo -e "\033[032m backup $MYSQLDB success\033[0m"
+else
+    echo "$MYSQLDB failed please check"
+fi
+
+#sh -n shellname   可以检测脚本是否正常
+
+

@@ -1,0 +1,23 @@
+
+# download kubebuilder and install locally.
+# curl -L -o kubebuilder https://go.kubebuilder.io/dl/latest/$(go env GOOS)/$(go env GOARCH)
+curl -L -o kubebuilder https://go.kubebuilder.io/dl/latest/darwin/arm64
+chmod +x kubebuilder
+
+
+mkdir kubebuilder-demo && cd kubebuilder-demo
+
+kubebuilder init --domain baiding.tech
+
+kubebuilder create api --group ingress --version v1beta1 --kind App
+
+kubebuilder create webhook --group ingress --version v1beta1 --kind App --defaulting --programmatic-validation --conversion
+
+type AppSpec struct {
+	EnableIngress bool   `json:"enable_ingress,omitempty"`
+	EnableService bool   `json:"enable_service"`
+	Replicas      int32  `json:"replicas"`
+	Image         string `json:"image"`
+}
+make manifests
+

@@ -1,0 +1,6 @@
+minikube安装ingress-nginx:
+minikube addons enable ingress
+
+
+minikube start
+

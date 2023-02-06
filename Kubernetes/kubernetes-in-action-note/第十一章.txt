@@ -1,0 +1,130 @@
+第十一章 了解Kubernetes机理
+
+11.1 了解架构
+Kubemetes集群分为两部分
+    Kubemetes控制平面
+    节点
+
+控制平面的组件:
+1 etcd分布式持久化存储
+2 API服务器
+3 调度器
+4 控制器管理器
+
+工作节点上运行的组件:
+1 Kubelet
+2 Kubelet服务代理(kube-proxy)
+3 容器运行时(Docker、rkt或者其他)
+
+附加组件:
+1 Kubemetes DNS服务器
+2 仪表板
+3 Ingress控制器
+4 Heapster (容器集群监控)
+5 容器网络接口插件
+
+
+11.1.1 Kubernetes 组件的分布式特性
+
+API Server对外暴露资源
+kubectl get componentstatuses
+
+kubectl attach命令和kubectl exec 命令类似, 区别是:前者会附属到容器中运行着的主进程上, 而后者是重新运行一个进程
+
+kubectl get po -o custom-columns=POD:metadata.name,NODE:spec.nodeName --sort-by spec.nodeName -n kube-system
+#可以通过-o custom-columns选项⾃定义展⽰的列以及--sort-by对资源列表进⾏排序
+
+
+11.1.2 Kubernetes 如何使用 etcd
+
+
+etcdctl ls /registry #v3不支持
+etcdctl get /registry --prefix=true #没有安装etcd
+
+etcdctl ls /registry/pods
+etcdctl ls /registry/pods/default
+
+
+11.1.3 API服务器做了什么
+https://kubernetes.io/docs/admin/admission-controllers/ #准入插件官方文档
+
+
+11.1.4 API服务器如何通知客户端资源变更
+
+```
+当需要创建一种资源时,API服务器启动这些控制器,以及其他⼀些组件来监控已部署资源的变更
+
+kubectl get pods --watch
+
+kubectl get pods -o yaml --watch
+```
+
+11.1.5 了解调度器
+
+```
+选择节点操作可以分解为两部分
+1 过滤所有节点, 找出能分配给 pod 的可用节点列表。
+2 对可用节点按优先级排序, 找出最优节点。 如果多个节点都有最高的优先级分数, 那么则循环分配, 确保平均分配给 pod。
+```
+
+可以实现自己的 调度器, 部署到集群, 或者可以部署有不同配置项的额外**Kubemetes** 调度器实例
+
+11.1.6 介绍控制器管理器中运行的控制器
+
+```
+控制器的源代码可以从 https://github.com/kubemetes/kubemetes/blob/master/pkg/controller 获取
+```
+
+11.1.7 Kubelet做了什么
+
+11.1.8 Kubernetes Service Proxy的作⽤
+
+11.1.9 介绍Kubernetes插件
+
+### 11.2 控制器如何协作
+
+11.2.1 了解涉及哪些组件
+
+11.2.2 事件链
+
+11.2.3 观察集群事件
+
+```
+kubecctl get events --watch
+```
+
+### 11.3 了解运行中的pod是什么
+
+```
+kubectl run nginx --image=nginx
+docker ps #pause优先创建
+```
+
+### 11.4 跨pod网络
+
+11.4.1 ⽹络应该是什么样的
+
+11.4.2 深⼊了解⽹络⼯作原理
+
+11.4.3 引⼊容器⽹络接⼜
+
+### 11.5 服务是如何实现的
+
+11.5.1 引⼊kube-proxy
+
+11.5.2 kube-proxy 如何使⽤iptables
+
+### 11.6 运行高可用集群
+
+11.6.1 让你的应⽤变得⾼可⽤
+
+```
+⼀个Kubernetes 中 领 导 选 举 的 例 ⼦:
+https://github.com/kubernetes/contrib/tree/master/election
+```
+
+11.6.2 让Kubernetes控制平⾯变得⾼可⽤
+
+```shell
+kubectl get endpoints kube-scheduler -n kube-system -o yaml
+```

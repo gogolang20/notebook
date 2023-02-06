@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "semaphore.h": "c",
+        "thread_pool.h": "c",
+        "socket.h": "c",
+        "tty.h": "c"
+    }
+}

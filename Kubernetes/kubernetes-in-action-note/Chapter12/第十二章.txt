@@ -1,0 +1,256 @@
+第十二章 Kubernetes API 服务器的安全防护
+
+### 12.1 了解认证机制
+
+12.1.1 ⽤户和组
+
+12.1.2 ServiceAccount介绍
+
+```shell
+kubectl get sa #serviceaccount 的缩写是sa
+```
+
+12.1.3 创建ServiceAccount
+
+```shell
+kubectl create serviceaccount foo
+kubectl describe sa foo
+kubectl describe secret foo-XXX
+```
+
+```shell
+sa-image-pull-secrets.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: my-service-account
+imagePullSecrets:
+- name: my-dockerhubpsecret
+```
+
+2.1.4 将ServiceAccount分配给pod
+
+注意 pod的ServiceAccount必须在pod创建时进⾏设置,后续不能被修改
+
+```shell
+vim /root/curl-custom-sa.yaml
+apiVersion: v1
+kind: Pod
+metadata: 
+  name: curl-custom-sa
+spec:
+  serviceAccountName: foo
+  containers: 
+  - name: main
+    image: tutum/curl
+    command: ["sleep", "9999999"]
+  - name: ambassador
+    image: luksa/kubectl-proxy:1.6.2
+kubectl create -f curl-custom-sa.yaml
+
+kubectl exec -it curl-custom-sa -c main
+kubectl exec -it curl-custom-sa -c main curl localhost:8001/api/v1/pods
+```
+
+### 12.2 通过基于角色的权限控制加强集群安全
+
+12.2.1 介绍RBAC授权插件
+
+RBAC授权插件将⽤户⾓⾊作为决定⽤户能否执⾏操作 的关键因素
+
+12.2.2 介绍RBAC资源
+
+```shell
+重新启⽤RBAC
+kubectl delete clusterrolebinding permissive-binding #重新启⽤RBAC
+
+创建命名空间和运⾏pod
+kubectl create ns foo
+$ namespace/foo created
+kubectl create ns bar
+$ namespace/bar created
+kubectl run test --image=luksa/kubectl-proxy -n foo
+$ pod/test created
+kubectl run test --image=luksa/kubectl-proxy -n bar
+$ pod/test created
+
+另开两个终端
+kubectl get po -n foo
+eg:kubectl exec -it {podName} -n foo sh
+kubectl exec -it test -n foo sh
+
+kubectl get po -n bar
+eg:kubectl exec -it {podName} -n bar sh
+kubectl exec -it test -n bar sh
+
+/ # curl localhost:8001/api/v1/namespace/foo/services
+{
+  "kind": "Status",
+  "apiVersion": "v1",
+  "metadata": {
+
+  },
+  "status": "Failure",
+  "message": "namespace \"foo\" is forbidden: User \"system:serviceaccount:foo:default\" cannot get resource \"namespace/services\" in API group \"\" at the cluster scope",
+  "reason": "Forbidden",
+  "details": {
+    "name": "foo",
+    "kind": "namespace"
+  },
+  "code": 403
+```
+
+12.2.3 使⽤Role和RoleBinding
+
+```shell
+vim /root/service-reader.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: foo
+  name: service-reader
+rules:
+- apiGroups: [""]
+  verbs: ["get", "list"]
+  resources: ["services"]
+kubectl create -f service-reader.yaml -n foo
+$ role.rbac.authorization.k8s.io/service-reader created
+
+创建了两个⾓⾊还不够 (可以执⾏curl命令来再次检查),你需要将每个⾓⾊绑定到各⾃命名空间中的ServiceAccount上
+kubectl create role service-reader --verb=get --verb=list --resource=services -n bar
+$ role.rbac.authorization.k8s.io/service-reader created
+
+kubectl create rolebinding test --role=service-reader --serviceaccount=foo:default -n foo
+$ rolebinding.rbac.authorization.k8s.io/test created
+
+注意:如果要绑定⼀个⾓⾊到⼀个user(⽤户)⽽不是ServiceAccount上,使⽤--user作为参数来指定⽤户名。如果要绑定⾓⾊到组,可以使⽤--group参数。
+```
+
+```shell
+kubectl get rolebinding test -n foo -o yaml
+
+curl localhost:8001/api/v1/namespaces/foo/services
+{
+  "kind": "ServiceList",
+  "apiVersion": "v1",
+  "metadata": {
+    "selfLink": "/api/v1/namespaces/foo/services",
+    "resourceVersion": "47254"
+  },
+  "items": []
+}
+
+kubectl edit rolebinding test -n foo #添加
+subjects:
+- kind: ServiceAccount
+  name: default
+  namespace: bar
+```
+
+```shell
+curl localhost:8001/api/v1/namespaces/foo/services #bar namespace sh运行
+{
+  "kind": "ServiceList",
+  "apiVersion": "v1",
+  "metadata": {
+    "selfLink": "/api/v1/namespaces/foo/services",
+    "resourceVersion": "47997"
+  },
+  "items": []
+}
+```
+
+12.2.4 使⽤ClusterRole和ClusterRoleBinding
+
+```shell
+ClusterRole是⼀种集群级资源,它允许访问没有命名空间的资源和 ⾮资源型的URL,或者作为单个命名空间内部绑定的公共⾓⾊,从⽽避免必须在每个命名空间中重新定义相同的⾓⾊。
+
+创建⼀个叫作pvreader的ClusterRole
+kubectl create clusterrole pv-reader --verb=get,list --resource=persistentvolumes
+$ clusterrole.rbac.authorization.k8s.io/pv-reader created
+
+kubectl get clusterrole pv-reader -o yaml
+curl localhost:8001/api/v1/persistentvolumes #在foo的sh终端执行
+#和预期的⼀样,默认ServiceAccount不能列出PersistentVolume,需要将ClusterRole绑定到ServiceAccount来允许它这样做
+
+kubectl create rolebinding pv-test --clusterrole=pv-reader --serviceaccount=foo:default -n foo
+$ rolebinding.rbac.authorization.k8s.io/pv-test created
+
+curl localhost:8001/api/v1/persistentvolumes
+#依旧不可以
+
+kubectl get rolebindings pv-test -o yaml -n foo
+# 排查问题
+# 尽管你可以创建⼀个RoleBinding并在你想开启命名空间资源的访问时引⽤⼀个ClusterRole,但是不能对集群级别(没有命名空间的)资源使⽤相同的⽅法。必须始终使⽤ClusterRoleBinding来对集群级别的
+# 资源进⾏授权访问
+```
+
+```shell
+# 先删除,才能重建
+kubectl delete rolebinding pv-test -n foo
+$ rolebinding.rbac.authorization.k8s.io "pv-test" deleted
+
+#创建ClusterRoleBinding
+kubectl create clusterrolebinding pv-test --clusterrole=pv-reader --serviceaccount=foo:default -n foo
+$ clusterrolebinding.rbac.authorization.k8s.io/pv-test created
+
+curl localhost:8001/api/v1/persistentvolumes #列出PersistentVolume:ok了
+{
+  "kind": "PersistentVolumeList",
+  "apiVersion": "v1",
+  "metadata": {
+    "selfLink": "/api/v1/persistentvolumes",
+    "resourceVersion": "50561"
+  },
+  "items": []
+}
+
+kubectl get clusterrole system:discovery -o yaml
+kubectl get clusterrolebinding system:discovery -o yaml
+
+eg:curl https://{ip}:8443/api -k
+curl https://:8443/api -k #有待确认IP
+
+使⽤ClusterRole来授权访问指定命名空间中的资源
+#默认的view ClusterRole
+kubectl get clusterrole view -o yaml
+
+使⽤第⼀个命令,可以试着列出所有命名空间的pod
+curl localhost:8001/api/v1/pods #不支持
+使⽤第⼆个命令,可以试着列出在foo命名空间中的pod
+curl localhost:8001/api/v1/namespace/foo/pods #不支持
+
+kubectl create clusterrolebinding view-test --clusterrole=view --serviceaccount=foo:default
+$ clusterrolebinding.rbac.authorization.k8s.io/view-test created
+
+curl localhost:8001/api/v1/namespaces/foo/pods #ok
+curl localhost:8001/api/v1/namespaces/bar/pods #ok
+curl localhost:8001/api/v1/pods #ok
+
+如果⽤⼀个RoleBinding替换ClusterRoleBinding会发⽣什么
+kubectl delete clusterrolebinding view-test 
+$ clusterrolebinding.rbac.authorization.k8s.io "view-test" deleted
+
+kubectl create rolebinding view-test --clusterrole=view --serviceaccount=foo:default -n foo
+$ rolebinding.rbac.authorization.k8s.io/view-test created
+
+curl localhost:8001/api/v1/namespaces/foo/pods #ok
+curl localhost:8001/api/v1/namespaces/bar/pods #not ok
+curl localhost:8001/api/v1/pods #not ok
+
+何时使⽤具体的role和binding的组合 #参考PDF 570页
+```
+
+12.2.5 了解默认的ClusterRole和ClusterRoleBinding
+
+```shell
+kubectl get clusterrolebindings
+kubectl get clusterroles
+
+⽤view ClusterRole允许对资源的只读访问
+⽤edit ClusterRole允许对资源的修改
+⽤admin ClusterRole赋予⼀个命名空间全部的控制权
+⽤cluster-admin ClusterRole得到完全的控制
+```
+
+12.2.6 理性地授予授权权限

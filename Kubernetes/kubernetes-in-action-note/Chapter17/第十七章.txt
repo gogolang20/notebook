@@ -1,0 +1,184 @@
+第十七章 开发应用的最佳实践
+
+### 17.1 集中一切资源
+
+### 17.2 了解pod的生命周期
+
+17.2.1 应⽤必须预料到会被杀死或者重新调度
+
+17.2.2 重新调度死亡的或者部分死亡的pod
+
+```
+ReplicaSet和 持续崩溃的pod #可以演示查看
+```
+
+17.2.3 以固定顺序启动pod
+
+```
+init容器介绍
+(参考第七章的pod)
+vim /root/fortune-client.yaml
+
+kubectl create -f fortune-client.yaml
+```
+
+17.2.4 增加⽣命周期钩⼦
+
+```yaml
+1 启动后(Post-start)钩⼦
+2 停⽌前(Pre-stop)钩⼦
+
+这些⽣命周期的钩⼦是基于每个容器来指定的,和init容器不同的 是,init容器是应⽤到整个pod。
+
+⼀个包含启动后⽣命周期钩⼦的pod:
+vim /root/poststart-hook.yaml
+apiVersion: v1
+kind: Pod
+metadata: 
+  name: pod-with-poststart-hook
+spec:
+  containers:
+  - image: luksa/kubia
+    name: kubia
+    lifecycle:
+      postStart:
+        exec:
+          command:
+          - sh
+          - -c
+          - "echo 'hook will fail with exit code 15'; sleep 5; exit 5"
+kubectl create -f poststart-hook.yaml
+kubectl describe pod pod-with-poststart-hook
+
+poststart-hook-httpget.yaml #代码归档中找到
+kubectl exec my-pod cat logfile.txt
+```
+
+```yaml
+vim /root/pre-stop-hookhttpget.yaml
+apiVersion: v1
+kind: Pod
+metadata: 
+  name: pod-with-prestop-hook
+spec:
+  containers:
+  - image: luksa/kubia
+    name: kubia
+    lifecycle:
+      preStop:
+        httpGet:
+          port: 8080
+          path: shutdown
+kubectl create -f pre-stop-hookhttpget.yaml
+```
+
+17.2.5 了解pod的关闭
+
+```
+pod的关闭是通过API服务器删除pod的对象来触发的
+
+当接收到HTTP DELETE请求后,API服务器还没有删除pod对象,⽽是给pod设置⼀个deletionTimestamp值。拥有deletionTimestamp的pod就开始停⽌了
+
+当Kubelet意识到需要终⽌pod的时候,它开始终⽌pod中的每个容 器
+
+1.执⾏停⽌前钩⼦(如果配置了的话),然后等待它执⾏完毕
+2.向容器的主进程发送SIGTERM信号
+3.等待容器优雅地关闭或者等待终⽌宽限期超时
+4.如果容器主进程没有优雅地关闭,使⽤SIGKILL信号强制终⽌进程事件的顺序
+
+在删除pod的时候,pod spec中指定的终⽌宽限时间也可以通过如下⽅式来覆盖:
+kubectl delete po {podName} --grace-period=5
+
+kubectl delete po {podName} --grace-period=0 --force
+```
+
+### 17.3 确保所有的客户端请求都得到了妥善处理
+
+17.3.1 在pod启动时避免客户端连接断开
+
+```
+就绪探针
+```
+
+17.3.2 在pod关闭时避免客户端连接断开
+
+```
+1 执⾏停⽌前钩 ⼦,发送SIGTERM信号,等待⼀段时间,然后在容器没有⾃我终⽌时 强制杀死容器
+2 修改endpoint:事件必须先到达Endpoint控制器,然后Endpoint控制器向API服务器发 送新的请求,然后API服务器必须修改kube-proxy,最后kube-proxy再修改iptables规则。
+
+⽤于避免连接断开的停⽌前钩⼦
+lifecycle:
+  preStop:
+    exec:
+      command:
+      - sh
+      - -c
+      - "sleep 5"
+```
+
+### 17.4 让应用在Kubernetes中方便运行和管理
+
+17.4.1 构建可管理的容器镜像
+
+17.4.2 合理地给镜像打标签,正确地使⽤ImagePullPolicy
+
+```
+标签可以包含如下的内容
+资源所属的应⽤(或者微服务)的名称
+应⽤层级(前端、后端,等等)
+运⾏环境(开发、测试、预发布、⽣产,等等)
+版本号
+发布类型(稳定版、⾦丝雀、蓝绿开发中的绿⾊或者蓝⾊,等等)
+租户(如果你在每个租户中运⾏不同的pod⽽不是使⽤命名空间)
+分⽚(带分⽚的系统)
+```
+
+17.4.3 使⽤多维度⽽不是单维度的标签
+
+17.4.4 通过注解描述每个资源
+
+17.4.5 给进程终⽌提供更多的信息
+
+```
+进程需要写⼊终⽌消息的⽂件默认路径是 /dev/termination-log,当然这个路径也可以在 pod spec中容器定义的部分设置terminationMessagePath字段来⾃定义
+
+vim /root/termination-message.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pod-with-termination-message
+spec:
+  containers:
+  - image: busybox
+    name: main
+    terminationMessagePath: /var/termination-reason
+    command: 
+    - sh
+    - -c
+    - 'echo "I''ve had enough" > /var/termination-reason ; exit 1'
+kubectl create -f termination-message.yaml
+kubectl describe pod pod-with-termination-message #可以查看到退出原因
+```
+
+17.4.6 处理应⽤日志
+
+```
+提⽰ 如果⼀个容器崩溃了,然后使⽤⼀个新的容器替代它,你就 会看到新的容器的⽇志。如果希望看到之前容器的⽇志,那么在使⽤kubectl logs命令的时候,加上选项--previous。
+
+使⽤kubectl cp命令将⽇志⽂件复制到本地机器
+kubectl cp foo-pod:/var/log/foo.log foo.log
+#⼀个pod名叫foo-pod,它只有⼀个容器,并且 这个容器有个⽂件叫作/var/log/foo.log,那么可以使⽤下⾯的命令将这个⽂件传送到本地机器
+
+kubectl cp localfile foo-pod:/etc/remotefile
+#这个命令把本地⽂件localfile复制到了pod的容器⾥⾯,路径是/etc/remotefile。
+```
+
+### 17.5 开发和测试的最佳实践
+
+17.5.1 开发过程中在Kubernetes之外运⾏应⽤
+
+```
+将本地⽂件系统通过Docker的Volume挂载到容器中。这样,当你给应⽤构建了⼀个新的⼆进制版本之后,你所需要做的事情就是重启这个容器(在⽀持热部署的情况下,甚⾄都不需要重启容器),不需要重新构建整个镜像
+```
+
+17.5.2 在开发过程中使用Minikube
