@@ -465,4 +465,25 @@ Dockerfile文件指令:(https://docs.docker.com/engine/reference/builder/)
 		5 自定义网络
 
 
+#-----------------------------------------------------------#
+
+docker pull grafana/grafana
+docker run --rm --name=grafana -d -p 3000:3000 e6bd500462e7
+http://localhost:3000/login
+admin && admin
+
+Data sources prometheus: http://{pod_IP}:9090
+http://172.17.0.3:9090
+
+docker pull prom/prometheus
+docker run --rm --name=prom -d -p 9090:9090 5b45069f212c
+docker exec -it prometheus sh
+localhost:9090/metrics
+
+docker run --rm --name mongodb -d -p 27017:27017 mongo
+docker exec -it mongodb mongo
+docker run --rm --name redisdb -d -p 6379:6379 redis
+docker exec -it redisdb redis-cli
+docker run --rm --name mysqldb -d -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql
+docker exec -it mysqldb mysql -uroot -p123456
 
