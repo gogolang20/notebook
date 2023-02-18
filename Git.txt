@@ -86,21 +86,15 @@ du -sh
 
 
 附录
-本地IDE 演示
-go mod init github.com/gogolang20/test
-
-git init 
-git add .
-git commit -m "first commit"
-
-git remote add origin https://github.com/gogolang20/test.git #添加别名 origin
-git remote -v #查看对应别名
-
-#git push GitRepo网址(可以使用别名) 分支名
-git push -u origin master
-
+Create module:
+create repo in github
+add .gitignore
+git clone github.com/gogolang20/template
+go mod init github.com/gogolang20/template
+add code
+git commit -m "add code"
 git tag  v0.1.0 
 git push origin v0.1.0
-其他项目就可以引用了
+# git push -u origin main
 
 笔记网址: https://duoke360.com/tutorial/git/git-merge
