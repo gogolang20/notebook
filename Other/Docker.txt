@@ -482,8 +482,11 @@ localhost:9090/metrics
 
 docker run --rm --name mongodb -d -p 27017:27017 mongo
 docker exec -it mongodb mongo
+
 docker run --rm --name redisdb -d -p 6379:6379 redis
 docker exec -it redisdb redis-cli
-docker run --rm --name mysqldb -d -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql
-docker exec -it mysqldb mysql -uroot -p123456
 
+docker run --rm --name mysqldb -d -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql
+docker cp atguigudb.sql mysqldb:/
+docker exec -it mysqldb mysql -uroot -p123456
+source  /atguigudb.sql

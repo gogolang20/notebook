@@ -9,8 +9,6 @@ INSERT into db_bak select * from db;
 select * from db_bak;
 
 #----------------------------------------------------------#----------------------------------------------------------#
-#----------------------------------------------------------#----------------------------------------------------------#
-
 ## MySQL权限管理和数据库备份
 
 命令行模式备份:
@@ -23,9 +21,12 @@ select * from db_bak;
 >mysqldump -hlocalhost -uroot -p{password}  databaseName > backup_file_location
 #备份数据库
 
-
+#----------------------------------------------------------#----------------------------------------------------------#
 导入数据库:
->source /root/mysql_sql/atguigudb.sql #需要先登录到MySQL
+docker run --rm --name mysqldb -d -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql
+docker cp atguigudb.sql mysqldb:/
+docker exec -it mysqldb mysql -uroot -p123456
+>source  /atguigudb.sql
 >use atguigudb
 >desc jobs; #查看table属性
 
@@ -33,7 +34,6 @@ select * from db_bak;
 
 #----------------------------------------------------------#----------------------------------------------------------#
 #----------------------------------------------------------#----------------------------------------------------------#
-
 >show engines;
 >show databases;
 >show tables;
@@ -43,20 +43,18 @@ select * from db_bak;
 
 >show variables like 'character_%';
 
->source /root/mysql_sql/atguigudb.sql 
-
-
 #----------------------------------------------------------#----------------------------------------------------------#
 ## DML 数据操作语句
 #----------------------------------------------------------#----------------------------------------------------------#
 
-```mysql
 1 Insert 添加
 2 Update 修改
 3 Delete 删除
-4 Select 查询 #上面单独记录
+4 Select 查询 #单独记录
 
-mysql> use atguigudb; #基于atguigudb 数据库操作
+#基于atguigudb 数据库操作
+```mysql
+mysql> use atguigudb; 
 mysql> create table if not exists emp1 (
     -> id int,
     -> name varchar(15),
@@ -128,86 +126,58 @@ Delete和Truncate相同点:都能删除数据,都不会删除表结构
 ## DQL 查询语句！！！
 #----------------------------------------------------------#----------------------------------------------------------#
 
-Syntax:
-SELECT
-    [ALL | DISTINCT | DISTINCTROW ]
-    [HIGH_PRIORITY]
-    [STRAIGHT_JOIN]
-    [SQL_SMALL_RESULT] [SQL_BIG_RESULT] [SQL_BUFFER_RESULT]
-    [SQL_CACHE | SQL_NO_CACHE] [SQL_CALC_FOUND_ROWS]
-    select_expr [, select_expr] ...
-    [into_option]
-    [FROM table_references
-      [PARTITION partition_list]]
-    [WHERE where_condition]
-    [GROUP BY {col_name | expr | position}
-      [ASC | DESC], ... [WITH ROLLUP]]
-    [HAVING where_condition]
-    [ORDER BY {col_name | expr | position} #分页
-      [ASC | DESC], ...]
-    [LIMIT {[offset,] row_count | row_count OFFSET offset}] #排序
-    [PROCEDURE procedure_name(argument_list)]
-    [into_option]
-    [FOR UPDATE | LOCK IN SHARE MODE]
-
-into_option: {
-    INTO OUTFILE 'file_name'
-        [CHARACTER SET charset_name]
-        export_options
-  | INTO DUMPFILE 'file_name'
-  | INTO var_name [, var_name] ...
-}
-
-
 ```mysql
 >select * from employees;
 >select employee_id,email from employees;
+```
 
+别名 #使用双引号
 >select employee_id emp_id,email from employees; #别名 方式一
 >select employee_id emp_id,email AS em from employees; #别名 方式二,AS
 >select employee_id emp_id,email AS "邮 箱" from employees; #别名 方式三,用双引号
 
-#去除重复行
->select distinct department_id from employees; #distinct 关键字
+去除重复行 #distinct 关键字
+>select distinct department_id from employees;
 >select distinct department_id,salary from employees;
 
+
+空值参与运算
+```mysql
+#空值:null,不等同于0 或者 ''
+>select employee_id,salary "Month salary",salary * (1 + commission_pct) * 12 "Year salary",commission_pct from employees; #空值参与运算,结果一定也为空
+>select employee_id,salary "Month salary",salary * (1 + ifnull(commission_pct,0)) * 12 "Year salary",commission_pct from employees; #ifnull 处理
 ```
 
-```mysql
-#空值参与运算
-#空值:null,不等同于0 或者 ''
->select employee_id,salary "月工资",salary * (1 + commission_pct) * 12 "年工资",commission_pct from employees; #空值参与运算,结果一定也为空
->select employee_id,salary "月工资",salary * (1 + ifnull(commission_pct,0)) * 12 "年工资",commission_pct from employees; #ifnull 处理
-
-#反引号
+着重号 #反引号
 >select * from order; #报错
 >select * from `order`; #正确
 
-#查询常数
+查询常数
+```mysql
 >select 'MySQL',employee_id,email from employees;
+```
 
-#显示表结构
+显示表结构
 >describe employees;
 >desc employees;
 
-#Where 过滤条件
+# Where 过滤条件
+```mysql
 >select * from employees where department_id = 90;
 >select * from employees where last_name = 'King';
 ```
 
 ### 运算符
 
-算术运算符
-
+算术运算符 #dual 伪表
 ```mysql
 >SELECT 100, 100 + 0, 100 - 0, 100 + 50, 100 + 50 -30, 100 + 35.5, 100 - 35.5 FROM dual;
-#dual 伪表
+
 >SELECT 100, 100 * 1, 100 * 1.0, 100 / 1.0, 100 / 2,100 + 2 * 5 / 2,100 /3, 100 DIV 0 FROM dual;
 
 >SELECT employee_id,last_name,salary FROM employees where employee_id % 2 = 0; 
 
 >SELECT employee_id,salary,salary * 12 annual_sal FROM employees;
-
 ```
 
 比较运算符
@@ -593,11 +563,9 @@ mysql> select last_name,salary
 
 ```
 
-```
 #子查询的分类
 #单行子查询 vs 多行子查询
 #相关子查询 vs 不相关子查询
-```
 
 单行子查询
 
@@ -706,13 +674,12 @@ mysql> select j.* from jobs j,(select job_id,avg(salary) avg_sal from employees 
 #----------------------------------------------------------#----------------------------------------------------------#
 ## DDL 数据定义语句
 #----------------------------------------------------------#----------------------------------------------------------#
-```
+
 1 create
 2 alter
 3 drop
 4 rename
 5 truncate
-```
 
 ### 创建和管理数据库
 
@@ -836,13 +803,11 @@ mysql> set autocommit = true; #还原
 ## DCL 数据控制语言
 #----------------------------------------------------------#----------------------------------------------------------#
 
-```
 1 commit 提交 事物 #一旦执行commit 提交数据,数据将永久保存,无法回滚
 2 rollback 回滚 事物
 3 savepoint
 4 grant 赋予权限
 5 revoke 回收权限
-```
 
 ### commit && rollback
 
