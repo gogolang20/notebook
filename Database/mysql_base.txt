@@ -187,7 +187,7 @@ Delete和Truncate相同点:都能删除数据,都不会删除表结构
 1 等号运算符(=)判断等号两边的值、字符串或表达式是否相等,如果相等则返回1,不相等则返回0。
 >SELECT employee_id,salary FROM employees WHERE salary = 10000;
 
-2 安全等于运算符(<=>)与等于运算符(=)的作用是相似的,唯一的区别是‘<=>’可以用来对NULL进行判断。
+2 安全等于运算符(<=>)与等于运算符(=)的作用是相似的,唯一的区别是‘<=>'可以用来对NULL进行判断。
 >SELECT employee_id,commission_pct FROM employees WHERE commission_pct = 0.40;
 >SELECT employee_id,commission_pct FROM employees WHERE commission_pct <=> 0.40;
 
@@ -227,33 +227,33 @@ select least(first_name,last_name),least(length(first_name),length(last_name)) f
 “_”:只能匹配一个字符。
 >SELECT last_name FROM employees WHERE last_name LIKE '__o%';
 
-12 REGEXP运算符用来匹配字符串,语法格式为:expr REGEXP 匹配条件。如果expr满足匹配条件,返回1；如果不满足,则返回0。若expr或匹配条件任意一个为NULL,则结果为NULL。
+12 REGEXP运算符用来匹配字符串,语法格式为:expr REGEXP 匹配条件。如果expr满足匹配条件,返回1; 如果不满足,则返回0。若expr或匹配条件任意一个为NULL,则结果为NULL。
 >SELECT 'shkstart' REGEXP '^s', 'shkstart' REGEXP 't$', 'shkstart' REGEXP 'hk';
-
 ```
 
 逻辑运算符
 
-```
 OR ||
 AND &&
 NOT !
 XOR 异或
-```
+
 
 ### 排序与分页
 
-```mysql
-order by #列的别名只能在order by中使用
+排序 # order by；列的别名只能在order by中使用
 ASC(ascend): 升序
 DESC(descend): 降序
+```mysql
 >select employee_id,last_name,salary from employees order by salary desc; #降序
 >select employee_id,last_name,salary from employees order by salary; #默认升序
 
 多列排序
 >select department_id,last_name,salary from employees order by salary desc,department_id asc;
+```
 
-分页
+分页 # limit
+```mysql
 >select employee_id,last_name,salary from employees limit 0,20; #偏移量 + 条目数
 >select employee_id,last_name,salary from employees limit 20,20; #第二页
 
@@ -261,50 +261,55 @@ DESC(descend): 降序
 where salary > 6000 
 order by salary desc 
 limit 0,10;
-
 ```
 
+#----------------------------------------------------------#
 ### 多表查询
+#----------------------------------------------------------#
 
-```mysql
 >select employee_id,department_name 
 from employees,departments 
-where employees.`department_id` = departments.department_id; #用点 '.'
-#表名.列名
+where employees.`department_id` = departments.department_id;
+# employees.`department_id`
+# 用点 '.'
+# 表名.列名
 
 >select employee_id,department_name,employees.department_id
 from employees,departments 
-where employees.`department_id` = departments.department_id; 
+where employees.`department_id` = departments.department_id;
 
-#练习:查询员工employee_id,last_name,department_name,city
-#声明的别名必须要使用
-#不同table的列名相同,必须要添加table名称前缀
+
+# 练习:查询员工employee_id,last_name,department_name,city
+# 声明的别名必须要使用 !!!
+# 不同table的列名相同,必须要添加table名称前缀
 >select e.employee_id,last_name,department_name,city
 from employees e,departments d,locations l
 where e.`department_id` = d.department_id AND d.location_id = l.location_id;
 
-#非等值连接
+
+等值连接 and 非等值连接
+# 非等值连接
 >select last_name,salary,grade_level
 from employees e,job_grades j
 where e.salary between j.lowest_sal AND j.highest_sal;
 
-#自连接
-#练习:查询员工id,员工姓名及其管理者的id和姓名
+自连接 and 非自连接
+# 自连接
+# 练习:查询员工id,员工姓名及其管理者的id和姓名
 >select emp.employee_id,emp.last_name,mgr.employee_id,mgr.last_name
 from employees emp,employees mgr
 where emp.`manager_id` = mgr.`employee_id`;
 
-```
 
-```mysql
+内连接 and 外连接 !!!
 内连接:合并具有同一列的两个以上的表的行, 结果集中不包含一个表与另一个表不匹配的行
-
 外连接:两个表在连接过程中除了返回满足连接条件的行以外还返回左(或右)表中不满足条件的行,这种连接称为左(或右) 外连接。没有匹配的行时, 结果表中相应的列为空(NULL)。
-外连接的分类:左外连接、右外连接、满外连接
+外连接的分类:左外连接、右外连接、满外连接 (都包含交集部分)
 # Join ... on SQL99语法实现内连接
 >select employee_id,department_name 
 from employees e join departments d 
 on e.department_id = d.department_id;
+
 >select employee_id,department_name,city 
 from employees e join departments d 
 on e.department_id = d.department_id
@@ -321,7 +326,8 @@ on e.department_id = d.department_id;
 from employees e right outer join departments d 
 on e.department_id = d.department_id;
 #满外连接 union; union all
-#七种jion的实现
+
+# 七种jion的实现
 >select employee_id,department_name 
 from employees e join departments d 
 on e.department_id = d.department_id;
@@ -344,7 +350,7 @@ from employees e right join departments d
 on e.department_id = d.department_id
 where e.department_id is null;
 
-#MySQL实现满外连接
+# MySQL实现满外连接
 >select employee_id,department_name 
 from employees e left join departments d 
 on e.department_id = d.department_id
@@ -354,7 +360,7 @@ from employees e right join departments d
 on e.department_id = d.department_id
 where e.department_id is null;
 
-#剔除并集部分
+# 剔除并集部分
 >select employee_id,department_name 
 from employees e left join departments d 
 on e.department_id = d.department_id
@@ -365,68 +371,27 @@ from employees e right join departments d
 on e.department_id = d.department_id
 where e.department_id is null;
 
-```
 
 ### 单行函数
 
 日期和时间
-
-```mysql
 mysql> select curdate(),curtime(),now() from dual;
-+------------+-----------+---------------------+
-| curdate()  | curtime() | now()               |
-+------------+-----------+---------------------+
-| 2021-12-17 | 16:12:24  | 2021-12-17 16:12:24 |
-+------------+-----------+---------------------+
-1 row in set (0.05 sec)
 
-计算日期和时间的函数 
+计算日期和时间的函数
 mysql> select now(),date_add(now(),interval 1 year),date_sub(now(),interval 1 year) from dual;
-+---------------------+---------------------------------+---------------------------------+
-| now()               | date_add(now(),interval 1 year) | date_sub(now(),interval 1 year) |
-+---------------------+---------------------------------+---------------------------------+
-| 2021-12-17 16:31:16 | 2022-12-17 16:31:16             | 2020-12-17 16:31:16             |
-+---------------------+---------------------------------+---------------------------------+
-1 row in set (0.00 sec)
 
-```
 
 流程控制
-
-```mysql
 mysql> select last_name,salary,if(salary > 6000,"高工资","低工资") "details" from employees;
  ...
-```
+
 
 加密与解密函数
-
-```mysql
 mysql> select md5('mysql'),sha('mysql') from dual;
-+----------------------------------+------------------------------------------+
-| md5('mysql')                     | sha('mysql')                             |
-+----------------------------------+------------------------------------------+
-| 81c3b080dad537de7e10e0987a4bf52e | f460c882a18c1304d88854e902e11b85d71e7e1b |
-+----------------------------------+------------------------------------------+
-1 row in set (0.00 sec)
 #MD5 sha 不可逆的加密函数
-
 mysql> select version(),connection_id(),database(),schema(),user() from dual;
-+-----------+-----------------+------------+-----------+----------------+
-| version() | connection_id() | database() | schema()  | user()         |
-+-----------+-----------------+------------+-----------+----------------+
-| 5.7.36    |               2 | atguigudb  | atguigudb | root@localhost |
-+-----------+-----------------+------------+-----------+----------------+
-1 row in set (0.01 sec)
-
 mysql> select inet_aton('192.168.152.156'),inet_ntoa(3232274588) from dual;
-+------------------------------+-----------------------+
-| inet_aton('192.168.152.156') | inet_ntoa(3232274588) |
-+------------------------------+-----------------------+
-|                   3232274588 | 192.168.152.156       |
-+------------------------------+-----------------------+
-1 row in set (0.00 sec)
 
-```
 
 ### 聚合函数
 
@@ -451,51 +416,16 @@ Group by 的使用
 
 ```mysql
 mysql> select department_id,avg(salary),sum(salary) from employees group by department_id;
-+---------------+--------------+-------------+
-| department_id | avg(salary)  | sum(salary) |
-+---------------+--------------+-------------+
-|          NULL |  7000.000000 |     7000.00 |
-|            10 |  4400.000000 |     4400.00 |
-|            20 |  9500.000000 |    19000.00 |
-|            30 |  4150.000000 |    24900.00 |
-|            40 |  6500.000000 |     6500.00 |
-|            50 |  3475.555556 |   156400.00 |
-|            60 |  5760.000000 |    28800.00 |
-|            70 | 10000.000000 |    10000.00 |
-|            80 |  8955.882353 |   304500.00 |
-|            90 | 19333.333333 |    58000.00 |
-|           100 |  8600.000000 |    51600.00 |
-|           110 | 10150.000000 |    20300.00 |
-+---------------+--------------+-------------+
-12 rows in set (0.00 sec)
 
 mysql> select department_id,job_id,avg(salary),sum(salary) from employees group by department_id,job_id;
-+---------------+------------+--------------+-------------+
-| department_id | job_id     | avg(salary)  | sum(salary) |
-+---------------+------------+--------------+-------------+
 
 mysql> select department_id,avg(salary),sum(salary) from employees group by department_id with rollup;
-+---------------+--------------+-------------+
-| department_id | avg(salary)  | sum(salary) |
-+---------------+--------------+-------------+
-
 ```
 
 Having 的使用
 
 ```mysql
 mysql> select department_id,max(salary) from employees group by department_id having max(salary) > 10000;
-+---------------+-------------+
-| department_id | max(salary) |
-+---------------+-------------+
-|            20 |    13000.00 |
-|            30 |    11000.00 |
-|            80 |    14000.00 |
-|            90 |    24000.00 |
-|           100 |    12000.00 |
-|           110 |    12000.00 |
-+---------------+-------------+
-6 rows in set (0.00 sec)
 
 #方式一 效率高于方式二
 mysql> select department_id,max(salary) 
@@ -535,7 +465,9 @@ limit ...
 
 ```
 
+#----------------------------------------------------------#
 ### 子查询 ！！！
+#----------------------------------------------------------#
 
 ```mysql
 mysql> select last_name,salary 
