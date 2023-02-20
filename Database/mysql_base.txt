@@ -41,10 +41,8 @@ docker exec -it mysqldb mysql -uroot -p123456
 >show create database atguigudb; #查看创建database 的命令
 >show create table employees; #查看创建table 的命令
 
->show variables like 'character_%';
-
 #----------------------------------------------------------#----------------------------------------------------------#
-## DML 数据操作语句
+# DML 数据操作语句
 #----------------------------------------------------------#----------------------------------------------------------#
 
 1 Insert 添加
@@ -123,7 +121,7 @@ Delete和Truncate相同点:都能删除数据,都不会删除表结构
 
 
 #----------------------------------------------------------#----------------------------------------------------------#
-## DQL 查询语句！！！
+# DQL 查询语句！！！
 #----------------------------------------------------------#----------------------------------------------------------#
 
 ```mysql
@@ -305,10 +303,11 @@ where emp.`manager_id` = mgr.`employee_id`;
 内连接:合并具有同一列的两个以上的表的行, 结果集中不包含一个表与另一个表不匹配的行
 外连接:两个表在连接过程中除了返回满足连接条件的行以外还返回左(或右)表中不满足条件的行,这种连接称为左(或右) 外连接。没有匹配的行时, 结果表中相应的列为空(NULL)。
 外连接的分类:左外连接、右外连接、满外连接 (都包含交集部分)
-# Join ... on SQL99语法实现内连接
->select employee_id,department_name 
+# MYSQL 不支持 SQL92语法
+# SQL99语法实现内连接 (Join ... on)
+>select employee_id,department_name
 from employees e join departments d 
-on e.department_id = d.department_id;
+on e.department_id = d.department_id; # on 中填写链接条件
 
 >select employee_id,department_name,city 
 from employees e join departments d 
@@ -316,18 +315,22 @@ on e.department_id = d.department_id
 join locations l 
 on d.location_id = l.location_id;
 
-#SQL99语法实现外连接
-#left outer join 左外连接
+# SQL99语法实现外连接
+# 左外连接 left outer join
 >select last_name,department_name 
 from employees e left outer join departments d 
 on e.department_id = d.department_id;
-#右外连接
+# 右外连接
 >select last_name,department_name 
 from employees e right outer join departments d 
 on e.department_id = d.department_id;
-#满外连接 union; union all
+# 满外连接
+>select last_name,department_name 
+from employees e full outer join departments d 
+on e.department_id = d.department_id; # mysql不支持 full outer join 语法
 
-# 七种jion的实现
+union (去除重复记录) and union all (不去除重复记录)
+# 七种 jion 的实现
 >select employee_id,department_name 
 from employees e join departments d 
 on e.department_id = d.department_id;
@@ -373,127 +376,90 @@ where e.department_id is null;
 
 
 ### 单行函数
+数值函数
+mysql> select rand(),pi() from dual;
 
-日期和时间
+字符串函数
+mysql> select length('abcd'),ascii('ab'),concat('hello ', 'world') from dual;
+
+日期和时间函数
 mysql> select curdate(),curtime(),now() from dual;
-
-计算日期和时间的函数
 mysql> select now(),date_add(now(),interval 1 year),date_sub(now(),interval 1 year) from dual;
 
+流程控制函数
+mysql> select last_name,salary,if(salary > 6000,"high 工资","low 工资") "details" from employees;
 
-流程控制
-mysql> select last_name,salary,if(salary > 6000,"高工资","低工资") "details" from employees;
- ...
-
-
-加密与解密函数
+加密与解密函数 # MD5 sha 不可逆的加密函数
 mysql> select md5('mysql'),sha('mysql') from dual;
-#MD5 sha 不可逆的加密函数
+
+获取 mysql 信息函数
 mysql> select version(),connection_id(),database(),schema(),user() from dual;
 mysql> select inet_aton('192.168.152.156'),inet_ntoa(3232274588) from dual;
 
 
 ### 聚合函数
-
-聚合函数
-
-```mysql
-#常见的几个聚合函数:
-#avg sum 只适用于 数值类型的字段(或变量)
-#max min 适用于 数值 字符串 时间 类型的字段(或变量)
-#count
-#avg = sum / count
+1. 5大常用的聚合函数:
+# avg sum 只适用于 数值类型的字段(或变量)
+# max min 适用于 数值 字符串 时间 类型的字段(或变量)
+# count # avg = sum / count
 mysql> select avg(salary),sum(salary),max(salary),min(salary),count(salary) from employees;
-+-------------+-------------+-------------+-------------+---------------+
-| avg(salary) | sum(salary) | max(salary) | min(salary) | count(salary) |
-+-------------+-------------+-------------+-------------+---------------+
-| 6461.682243 |   691400.00 |    24000.00 |     2100.00 |           107 |
-+-------------+-------------+-------------+-------------+---------------+
-1 row in set (0.00 sec)
-```
 
-Group by 的使用
 
-```mysql
+2. Group by 的使用
 mysql> select department_id,avg(salary),sum(salary) from employees group by department_id;
-
+# select 中出现的非组函数的字段必须声明在group by 中.
 mysql> select department_id,job_id,avg(salary),sum(salary) from employees group by department_id,job_id;
-
+# with rollup 了解即可
 mysql> select department_id,avg(salary),sum(salary) from employees group by department_id with rollup;
-```
 
-Having 的使用
 
-```mysql
-mysql> select department_id,max(salary) from employees group by department_id having max(salary) > 10000;
+3. Having 的使用 (用来过滤数据)
+# 查询各个部门中最高工资比 10000 高的部门信息
+mysql> select department_id,max(salary) 
+from employees
+group by department_id 
+having max(salary) > 10000;
 
-#方式一 效率高于方式二
+# 方式一 (效率高于方式二)
 mysql> select department_id,max(salary) 
 from employees 
 where department_id in (10,20,30,40)
 group by department_id 
 having max(salary) > 10000;
-#方式二
+# 方式二
 mysql> select department_id,max(salary) 
-from employees 
+from employees
 group by department_id 
 having max(salary) > 10000 and department_id in (10,20,30,40);
+# 当过滤条件中有聚合函数时,则此过滤条件必须声明在having 中
 
-#当过滤条件中有聚合函数时,则此过滤条件必须声明在having 中
-```
 
-SQL 底层执行原理
-
-```mysql
-#一 select 语句的完整结构
-mysql> help select
-
-#二 SQl语句的执行过程
-select ... #第二部分
-
-from ... (left / right) join ... on #第一部分
-(left / right) join ... on 
-where ... 不包含聚合函数的过滤条件 
+4. SQL 底层执行原理
+# SQL99语句 语法&&执行过程
+select ...                          # 第二部分
+from ... (left/right) join ... on   # 第一部分
+(left/right) join ... on (on 链接条件)
+where ... and (不包含聚合函数的过滤条件)
 group by ...
-having ... 包含聚合函数的过滤条件
-
-order by ... (asc / desc) #第三部分
+having ... (包含聚合函数的过滤条件)
+order by ... (asc / desc)           # 第三部分
 limit ...
+# from -> on -> (left/right) join -> where -> group by -> having -> select -> distinct ->
+# order by -> limit
 
-#from -> on -> (left / right join) -> where -> group by -> having -> select -> distinct ->
-#order by -> limit 
-
-```
+# mysql> help select
 
 #----------------------------------------------------------#
-### 子查询 ！！！
+# 子查询 ！！！
 #----------------------------------------------------------#
 
-```mysql
 mysql> select last_name,salary 
-    -> from employees 
-    -> where salary > (
-    -> select salary 
-    -> from employees 
-    -> where last_name = "Abel"
-    -> );
-+-----------+----------+
-| last_name | salary   |
-+-----------+----------+
-| King      | 24000.00 |
-| Kochhar   | 17000.00 |
-| De Haan   | 17000.00 |
-| Greenberg | 12000.00 |
-| Russell   | 14000.00 |
-| Partners  | 13500.00 |
-| Errazuriz | 12000.00 |
-| Ozer      | 11500.00 |
-| Hartstein | 13000.00 |
-| Higgins   | 12000.00 |
-+-----------+----------+
-10 rows in set (0.00 sec)
-
-```
+from employees 
+where salary > (
+    select salary 
+    from employees 
+    where last_name = "Abel"
+);
 
 #子查询的分类
 #单行子查询 vs 多行子查询
@@ -501,24 +467,15 @@ mysql> select last_name,salary
 
 单行子查询
 
-```mysql
 mysql> select employee_id,last_name,salary from employees where salary >
     -> (select salary from employees where employee_id = 149);
-+-------------+-----------+----------+
-| employee_id | last_name | salary   |
-+-------------+-----------+----------+
 
 #having 中的子查询
 mysql> select department_id,min(salary) from employees group by department_id 
     -> having min(salary) > (select min(salary) from employees where department_id = 50);
-+---------------+-------------+
-| department_id | min(salary) |
-+---------------+-------------+
 
-```
 
 多行子查询
-
 ```mysql
 多行比较操作符
 1 in
@@ -557,7 +514,7 @@ having avg(salary) <= all(
 ```
 
 ```mysql
-#查询员工中工资大于本部门平均工资的员工的last_name,salary和其department_id
+# 查询员工中工资大于本部门平均工资的员工的last_name,salary和其department_id
 select last_name,salary,department_id
 from employees e1
 where salary > ( 
@@ -578,147 +535,123 @@ and e.salary > t_dept_avg_sal.avg_sal;
 ```mysql
 1 exists
 mysql> select employee_id,last_name,job_id,department_id from employees e1 where exists  (select * from employees e2 where e1.employee_id = e2.manager_id);
-+-------------+
-| employee_id |
-+-------------+
 
 2 not exists
 mysql> select department_id,department_name from departments d where not exists (
-    -> select * from employees e where d.department_id = e.department_id);
-+---------------+----------------------+
-| department_id | department_name      |
-+---------------+----------------------+
+select * from employees e where d.department_id = e.department_id);
 ```
-
-
 
 ```
 mysql> select j.* from jobs j,(select job_id,avg(salary) avg_sal from employees group by job_id order by avg_sal desc limit 0,1) t_job_avg_sal where j.job_id = t_job_avg_sal.job_id;
-+---------+-----------+------------+------------+
-| job_id  | job_title | min_salary | max_salary |
-+---------+-----------+------------+------------+
-| AD_PRES | President |      20000 |      40000 |
-+---------+-----------+------------+------------+
-
 ```
 
 
 #----------------------------------------------------------#----------------------------------------------------------#
-## DDL 数据定义语句
+# DDL 数据定义语句
 #----------------------------------------------------------#----------------------------------------------------------#
-
 1 create
 2 alter
 3 drop
 4 rename
 5 truncate
 
-### 创建和管理数据库
-
+创建和管理数据库
 ```mysql
-create database XXX;
-mysql> create database test; #使用默认字符集
-mysql> show create database test;
-+----------+---------------------------------------------------------------+
-| Database | Create Database                                               |
-+----------+---------------------------------------------------------------+
-| test     | CREATE DATABASE `test` /*!40100 DEFAULT CHARACTER SET utf8 */ |
-+----------+---------------------------------------------------------------+
+# 使用默认字符集
+mysql> create database mytest1; 
+mysql> show create database mytest1;
 
-mysql> create database test2 character set 'gbk';
-mysql> show create database test2\g
+mysql> create database mytest2 character set 'utf8mb4';
+mysql> show create database mytest2\g
 
-mysql> create database if not exists test character set 'gbk';
-mysql> show create database test;
+# 推荐
+mysql> create database if not exists mytest1 character set 'gbk';
+mysql> show create database mytest1;
 
-#查看当前使用的数据库
+mysql> show variables like 'character_%';
+```
+
+查看当前使用的数据库
+```mysql
 mysql> select database() from dual;
 mysql> show tables from information_schema;
-+---------------------------------------+
-| Tables_in_information_schema          |
-+---------------------------------------+
 
-mysql> alter database test character set 'utf8';
-mysql> drop database if exists test;
+mysql> alter database mytest1 character set 'utf8';
+mysql> drop database if exists mytest1;
 ```
 
-### 创建表
 
+创建表
 ```mysql
-方式一
-CREATE TABLE if not exists`myemp1` (
-`id` int,
-`emp_name` varchar(20) DEFAULT NULL,
-`hire_date` date NOT NULL
+# 方式一
+CREATE TABLE if not exists `myemp1` (
+    `id` int,
+    `emp_name` varchar(20) DEFAULT NULL,
+    `hire_date` date NOT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8;
 
-方式二 可以起别名作为新表字段
+# 方式二 可以起别名作为新表字段
 mysql> CREATE TABLE `myemp2` AS select employee_id,last_name,salary from employees; 
-mysql> select * from myemp2; #新表会复制数据
+mysql> select * from myemp2; # 新表会复制数据
 
 mysql> CREATE TABLE `myemp3` AS select employee_id,last_name,salary from employees;
-
 ```
 
-### 修改表
-
+修改表
 ```mysql
 mysql> desc myemp1;
-添加一个字段
-mysql> alter table myemp1 add salary double(10,2); #默认添加到最后一个字段
-
+# 添加一个字段 
+mysql> alter table myemp1 add salary double(10,2); # 默认添加到最后一个字段
 mysql> alter table myemp1 add phone_number varchar(20) first;
 mysql> alter table myemp1 add email varchar(45) after emp_name;
 
-修改一个字段
+# 修改一个字段
 mysql> alter table myemp1 modify emp_name varchar(25);
-mysql> alter table myemp1 modify emp_name varchar(45) default '默认值';
+mysql> alter table myemp1 modify emp_name varchar(45) default '默认值value';
 
-重命名一个字段
+# 重命名一个字段
 mysql> alter table myemp1 change salary monthly_salary double(10,2);
 mysql> alter table myemp1 change email my_email varchar(50);
 
-删除一个字段
+# 删除一个字段
 mysql> alter table myemp1 drop column my_email;
-
 ```
 
-
-
-```mysql
-mysql> show tables;
-
 重命名表
-mysql> rename table myemp1 to myemp11; #推荐
-mysql> alter table myemp2 rename to myemp12;
+```mysql
+mysql> rename table myemp1 to myemp12; # 推荐
+mysql> alter table myemp12 rename to myemp123;
+```
 
 删除表 
-#无法撤销,只能通过日志文件
-#删除表结构,同时删除表中数据,释放表空间
+# 无法撤销,只能通过日志文件
+# 删除表结构,同时删除表中数据,释放表空间
+```mysql
 mysql> drop table if exists myemp12;
+```
 
 清空表
-#清空表中所有数据,但是表结构保留
+# 清空表中所有数据,但是表结构保留
+```mysql
 mysql> select * from myemp2;
 mysql> truncate table myemp2; #表结构保留
 mysql> desc myemp2; 
-
 ```
 
 ### 对比truncate table 和 delete from
 
-```mysql
 相同点:都可以实现对表中所有数据的删除,同时保留表结构
 
 不同点:
-truncate table:一旦执行,表数据全部清除,同时,数据时不可以回滚的
-delete from:可以删除部分或者所有数据,同时数据是可以回滚的
+truncate table: 一旦执行,表数据全部清除,同时,数据时不可以回滚的
+delete from: 可以删除部分或者所有数据,同时数据是可以回滚的
 
 DDL 和 DML 的说明
 DDL:操作一旦执行,就不可以回滚(操作之后,一定会执行一次commit,且不受 set autocommit = false 影响)
 DML:默认情况,操作一旦执行,也不可以回滚。但是,设置 set autocommit = false,则可以回滚
 
 演示
+```mysql
 mysql> commit;
 mysql> select * from myemp3;
 mysql> set autocommit = false;
@@ -732,7 +665,7 @@ mysql> set autocommit = true; #还原
 
 
 #----------------------------------------------------------#----------------------------------------------------------#
-## DCL 数据控制语言
+# DCL 数据控制语言
 #----------------------------------------------------------#----------------------------------------------------------#
 
 1 commit 提交 事物 #一旦执行commit 提交数据,数据将永久保存,无法回滚
@@ -742,12 +675,9 @@ mysql> set autocommit = true; #还原
 5 revoke 回收权限
 
 ### commit && rollback
-
 ```mysql
 mysql> commit;
 mysql> rollback;
-
 mysql> set autocommit = false;
 mysql> set autocommit = true;
-
 ```
