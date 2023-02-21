@@ -1,23 +1,15 @@
-**Docker常用命令**
-docker pull 镜像名<:tags> - 从远程仓库抽取镜像 
-docker images - 查看本地镜像
-docker run 镜像名<:tags> - 创建容器,启动应用
-docker ps - 查看正在运行中的镜像
-docker rm <-f> 容器id - 删除容器
-docker rmi <-f> 镜像名:<tags> - 删除镜像
+systemctl start docker # 开启Docker服务
+sudo systemctl daemon-reload # 守护进程重启
+systemctl restart docker # 重启docker服务
+systemctl stop docker # 关闭docker
 
-开启Docker服务
-systemctl start docker
-守护进程重启:sudo systemctl daemon-reload
-重启docker服务:systemctl restart  docker
-关闭docker:systemctl stop docker
-
-运行命令:docker run -p 80:80 -d nginx
+运行命令:docker run --rm --name nginx -d -p 80:80 nginx
 -p 端口映射
 -d 后台运行
 使用虚拟机的IP地址:192.168.101.101:80
 
-**执行 docker info 时出现警告**
+
+执行 docker info 时出现警告
 WARNING: bridge-nf-call-iptables is disabled
 WARNING: bridge-nf-call-ip6tables is disabled
 解决办法:
@@ -30,30 +22,29 @@ sysctl -p
 再运行 docker info
 
 
-**查看tomcat容器内部**
+查看tomcat容器内部
 #docker exec -it 容器运行id /bin/bash
 #docker的安装文件位置:cd /var/lib/docker/
 进入容器后:
 cd webapps
 cat /proc/version (查看容器内的Linux系统版本)
 java -version(查看容器内的Java版本)
-exit (退出容器)
 
 **Dockerfile镜像描述文件**
 Dockerfile是一个包含用于组合镜像的命令的文本文档
 Docker通过读取Dockerfile中的指令按步自动生成镜像
-docker build -t 机构/镜像名<:tags> Dockerfile目录 
+docker build -t 机构/镜像名<:tags> Dockerfile_Dir
 
 **Dockerfile自动部署Tomcat应用**
 FROM tomcat:latest
 MAINTAINER mashibing.com
 WORKDIR /usr/local/tomcat/webapps
-ADD docker-web ./docker-web	第一个是要构建dockerfile的文件  第二个是虚拟机的workdir目录下的文件,不存在会自动创建
+ADD docker-web ./docker-web	# 第一个是要构建dockerfile的文件  第二个是虚拟机的workdir目录下的文件,不存在会自动创建
 FROM :设置基准镜像
 MAINTAINER :当前镜像维护的机构或个人
 WORKDIR :切换工作目录,不存在会自动创建
 ADD :将指定的文件或目录复制到镜像的指定目录下,建议使用绝对路径
-	docker build -t scs/docker_layer:1.0 .
+docker build -t scs/docker_layer:1.0 .
 
 
 镜像分层概念(layer)
@@ -490,3 +481,6 @@ docker run --rm --name mysqldb -d -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 mys
 docker cp atguigudb.sql mysqldb:/
 docker exec -it mysqldb mysql -uroot -p123456
 source  /atguigudb.sql
+
+docker run --rm --name nginx -d -p 80:80 nginx
+docker exec -it nginx /bin/bash # /etc/nginx/nginx.conf 镜像中配置文件位置

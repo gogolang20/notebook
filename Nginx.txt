@@ -33,7 +33,6 @@ firewall-cmd --reload
 
 
 ## Nginx 二
-
 ### 域名、dns与http协议
 
 docker容器化技术:作为应用服务器(解决资源过剩的问题)
@@ -44,7 +43,6 @@ kvm:虚拟化(解决资源过剩的问题)
 域名先通过本机hosts解析 --> DNS解析成IP地址
 
 DNS管理 域名解析
-
 C:\Windows\System32\drivers\etc
 打开 hosts 文件,进入配置
 192.168.152.129 fangxinkan.com

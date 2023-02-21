@@ -584,24 +584,28 @@ mysql> drop database if exists mytest1;
 创建表
 ```mysql
 # 方式一
-CREATE TABLE if not exists `myemp1` (
-    `id` int,
-    `emp_name` varchar(20) DEFAULT NULL,
-    `hire_date` date NOT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8;
+mysql> CREATE TABLE if not exists `myemp0` (
+    `id` int unsigned NOT NULL AUTO_INCREMENT,
+    `t_a` varchar(20) DEFAULT "",
+    `t_data` DATE,
+    `t_c` tinyint(1) DEFAULT 0,
+    `t_d` int unsigned DEFAULT 0,
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+mysql> show create table myemp1;
 
 # 方式二 可以起别名作为新表字段
-mysql> CREATE TABLE `myemp2` AS select employee_id,last_name,salary from employees; 
+mysql> CREATE TABLE `myemp1` AS select employee_id,last_name,salary from employees; 
 mysql> select * from myemp2; # 新表会复制数据
 
-mysql> CREATE TABLE `myemp3` AS select employee_id,last_name,salary from employees;
+mysql> CREATE TABLE `myemp2` AS select employee_id,last_name,salary from employees;
 ```
 
 修改表
 ```mysql
 mysql> desc myemp1;
 # 添加一个字段 
-mysql> alter table myemp1 add salary double(10,2); # 默认添加到最后一个字段
+mysql> alter table myemp1 add salary_add double(10,2); # 默认添加到最后一个字段
 mysql> alter table myemp1 add phone_number varchar(20) first;
 mysql> alter table myemp1 add email varchar(45) after emp_name;
 
