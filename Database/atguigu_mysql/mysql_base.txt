@@ -50,48 +50,38 @@ docker exec -it mysqldb mysql -uroot -p123456
 3 Delete 删除
 4 Select 查询 #单独记录
 
-#基于atguigudb 数据库操作
+# 基于atguigudb 数据库操作
 ```mysql
-mysql> use atguigudb; 
+mysql> use atguigudb;
 mysql> create table if not exists emp1 (
-    -> id int,
-    -> name varchar(15),
-    -> hire_date date,
-    -> salary double(10,2)
-    -> );
+    id int,
+    name varchar(15),
+    hire_date date,
+    salary double(10,2)
+);
 mysql> desc emp1;
-+-----------+--------------+------+-----+---------+-------+
-| Field     | Type         | Null | Key | Default | Extra |
-+-----------+--------------+------+-----+---------+-------+
-| id        | int(11)      | YES  |     | NULL    |       |
-| name      | varchar(15)  | YES  |     | NULL    |       |
-| hire_date | date         | YES  |     | NULL    |       |
-| salary    | double(10,2) | YES  |     | NULL    |       |
-+-----------+--------------+------+-----+---------+-------+
 mysql> select * from emp1;
 ```
 
 ### Insert 添加数据
 ```mysql
 方式一: 一条一条的添加
-mysql> insert into emp1 values(1,'Tom','2000-12-21',3400); #要按照声明的字段先后顺序添加
-
-mysql> insert into emp1(id,hire_date,salary,name) values(2,'1999-09-09',4000,'Jerry');
-mysql> insert into emp1(id,salary,name) values(3,4500,'shk');
+mysql> insert into emp1 values(1,'Tom','2000-12-21',3400); # 要按照声明的字段先后顺序添加
 mysql> select * from emp1;
-
-mysql> insert into emp1(id,salary,name) values(4,5000,'Jim'),(5,5500,'俊杰');
+mysql> insert into emp1(id,hire_date,salary,name) values(2,'1999-09-09',4000,'Jerry'); # 推荐
+mysql> select * from emp1;
+mysql> insert into emp1(id,salary,name) values(3,4500,'Mary');
+mysql> select * from emp1;
+mysql> insert into emp1(id,salary,name) values(4,5000,'Jim'),(5,5500,'Jack');
 
 方式二: 将查询结果插入到表中
 mysql> select * from emp1;
-
-mysql> insert into emp1(id,name,salary,hire_date)
-    -> select employee_id,last_name,salary,hire_date
-    -> from employees 
-    -> where department_id in (70,60);
-#emp1 表中要添加数据的字段的长度不能低于 employees 表中查询的字段的长度
+mysql> insert into emp1(id,name,salary,hire_date) 
+    select employee_id,last_name,salary,hire_date 
+    from employees 
+    where department_id in (70,60);
+# emp1 表中要添加数据的字段的长度不能低于 employees 表中查询的字段的长度
 # 否则会有添加不成功的风险
-
 mysql> select * from emp1;
 ```
 
@@ -100,20 +90,32 @@ mysql> select * from emp1;
 # update ... set ... where ...
 mysql> update emp1 set hire_date=curdate() where id=5;
 mysql> select * from emp1;
-
 mysql> update emp1 set hire_date=curdate(),salary=6000 where id=4;
 ```
 
 ### Delete 删除数据
 ```mysql
 # delete from emp1 [where 条件]
-# delete from emp1; #会全部删除数据,避免！
-mysql> delete from emp1 where id=1; #删除指定数据
+# delete from emp1; # 会全部删除数据 !!!
+mysql> delete from emp1 where id=1; # 删除指定数据
 
-Delete和Truncate相同点:都能删除数据,都不会删除表结构
-不同点Truncate:重新设置自增列 计数器会归零；不会影响事务
+Delete和Truncate相同点: 都能删除数据, 都不会删除表结构
+不同点Truncate: 重新设置自增列, 计数器会归零, 不会影响事务
 ```
+# 插入 修改 删除不成功可能是约束造成的 !!!
 
+
+MySQL8新特性: 计算列
+```mysql
+CREATE TABLE tb1(
+    id INT,
+    a INT,
+    b INT,
+    c INT GENERATED ALWAYS AS (a + b) VIRTUAL
+);
+
+INSERT INTO tb1(a,b) VALUES (100,200);
+```
 
 #----------------------------------------------------------#----------------------------------------------------------#
 # DQL 查询语句！！！
@@ -257,7 +259,7 @@ limit 0,10;
 ```
 
 #----------------------------------------------------------#
-### 多表查询
+# 多表查询
 #----------------------------------------------------------#
 
 >select employee_id,department_name 
@@ -680,16 +682,42 @@ DDL操作回滚日志写入到data dictionary数据字典表mysql.innodb_ddl_log
 # DCL 数据控制语言
 #----------------------------------------------------------#----------------------------------------------------------#
 
-1 commit 提交 事物 #一旦执行commit 提交数据,数据将永久保存,无法回滚
-2 rollback 回滚 事物
+1 commit 提交事物 # 一旦执行commit 提交数据,数据将永久保存,无法回滚
+2 rollback 回滚事物
 3 savepoint
 4 grant 赋予权限
 5 revoke 回收权限
 
 ### commit && rollback
-```mysql
-mysql> commit;
-mysql> rollback;
-mysql> set autocommit = false;
-mysql> set autocommit = true;
-```
+
+#----------------------------------------------------------#----------------------------------------------------------#
+# MySQL数据类型精讲
+#----------------------------------------------------------#----------------------------------------------------------#
+
+| 类型             | 类型举例                                                     |
+| ---------------- | ------------------------------------------------------------ |
+| 整数类型         | TINYINT、SMALLINT、MEDIUMINT、INT(或INTEGER)、BIGINT         |
+| 浮点类型         | FLOAT、DOUBLE                                                |
+| 定点数类型       | DECIMAL                                                      |
+| 位类型           | BIT                                                          |
+| 日期时间类型     | YEAR、TIME、DATE、DATETIME、TIMESTAMP                        |
+| 文本字符串类型   | CHAR、VARCHAR、TINYTEXT、TEXT、MEDIUMTEXT、LONGTEXT          |
+| 枚举类型         | ENUM                                                         |
+| 集合类型         | SET                                                          |
+| 二进制字符串类型 | BINARY、VARBINARY、TINYBLOB、BLOB、MEDIUMBLOB、LONGBLOB      |
+| JSON类型         | JSON对象、JSON数组                                           |
+| 空间数据类型     | 单值类型：GEOMETRY、POINT、LINESTRING、POLYGON；<br/>集合类型：MULTIPOINT、MULTILINESTRING、MULTIPOLYGON、GEOMETRYCOLLECTION |
+
+常见数据类型的属性，如下：
+
+| MySQL关键字        | 含义                     |
+| ------------------ | ------------------------ |
+| NULL               | 数据列可包含NULL值       |
+| NOT NULL           | 数据列不允许包含NULL值   |
+| DEFAULT            | 默认值                   |
+| PRIMARY KEY        | 主键                     |
+| AUTO_INCREMENT     | 自动递增，适用于整数类型 |
+| UNSIGNED           | 无符号                   |
+| CHARACTER SET name | 指定一个字符集           |
+
+
