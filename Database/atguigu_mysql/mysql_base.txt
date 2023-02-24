@@ -582,8 +582,8 @@ mysql> drop database if exists mytest1;
 ```mysql
 # 方式一
 mysql> CREATE TABLE if not exists `myemp0` (
-    `id` int unsigned NOT NULL AUTO_INCREMENT,
-    `t_a` varchar(20) DEFAULT "",
+    `id` int unsigned AUTO_INCREMENT,
+    `t_a` varchar(20) NOT NULL DEFAULT "",
     `t_data` DATE,
     `t_c` tinyint(1) DEFAULT 0,
     `t_d` int unsigned DEFAULT 0,
@@ -719,5 +719,240 @@ DDL操作回滚日志写入到data dictionary数据字典表mysql.innodb_ddl_log
 | AUTO_INCREMENT     | 自动递增，适用于整数类型 |
 | UNSIGNED           | 无符号                   |
 | CHARACTER SET name | 指定一个字符集           |
+
+
+# 修改当前的时区
+```mysql
+SET time_zone = '+9:00';
+```
+
+
+#----------------------------------------------------------#----------------------------------------------------------#
+# 约束
+#----------------------------------------------------------#----------------------------------------------------------#
+
+查看某个表已有的约束
+# information_schema数据库名(系统库)
+# table_constraints表名称(专门存储各个表的约束)
+```mysql
+mysql> SELECT * FROM information_schema.table_constraints WHERE table_name = 'employees';
+```
+
+```mysql
+create table 表名称(
+	字段名  数据类型,
+    字段名  数据类型,  
+    字段名  数据类型,
+    [constraint 约束名] unique key(字段名)
+);
+
+CREATE TABLE USER(
+    id INT NOT NULL,
+    NAME VARCHAR(25),
+    PASSWORD VARCHAR(16),
+    -- 使用表级约束语法
+    CONSTRAINT uk_name_pwd UNIQUE(NAME,PASSWORD)
+);
+# 表示用户名和密码组合不能重复
+```
+
+删除唯一约束
+- 添加唯一性约束的列上也会自动创建唯一索引。
+- 删除唯一约束只能通过删除唯一索引的方式删除。
+- 删除时需要指定唯一索引名，唯一索引名就和唯一约束名一样。
+- 如果创建唯一约束时未指定名称，如果是单列，就默认和列名相同；如果是组合列，那么默认和()中排在第一个的列名相同。也可以自定义唯一性约束名。
+
+```mysql
+mysql> ALTER TABLE USER DROP INDEX uk_name_pwd;
+
+# 查看表的索引
+mysql> show index from USER;
+```
+
+删除主键约束
+```mysql
+alter table 表名称 drop primary key;
+```
+
+MySQL 8.0新特性—自增变量的持久化
+# auto_increment
+
+
+FOREIGN KEY 约束
+```mysql
+create table dept( #主表
+	did int primary key,		#部门编号
+    dname varchar(50)			#部门名称
+);
+
+create table emp(#从表
+	eid int primary key,  #员工编号
+    ename varchar(5),     #员工姓名
+    deptid int,				#员工所在的部门
+    foreign key (deptid) references dept(did)   #在从表中指定外键约束
+    #emp表的deptid和和dept表的did的数据类型一致, 意义都是表示部门的编号
+);
+
+说明：
+1 主表dept必须先创建成功, 然后才能创建emp表, 指定外键成功。
+2 删除表时, 先删除从表emp, 再删除主表dept
+```
+
+约束等级
+* `Cascade方式`: 在父表上update/delete记录时, 同步update/delete掉子表的匹配记录 
+* `Set null方式`: 在父表上update/delete记录时, 将子表上匹配记录的列设为null, 但是要注意子表的外键列不能为not null  
+* `No action方式`: 如果子表中有匹配的记录, 则不允许对父表对应候选键进行update/delete操作  
+* `Restrict方式`: 同no action, 都是立即检查外键约束
+* `Set default方式`(在可视化工具SQLyog中可能显示空白): 父表有变更时, 子表将外键列设置成一个默认的值, 但Innodb不能识别
+
+如果没有指定等级, 就相当于Restrict方式。
+对于外键约束，最好是采用: `ON UPDATE CASCADE ON DELETE RESTRICT` 的方式。
+
+
+删除外键约束
+流程如下：
+```mysql
+(1)第一步先查看约束名和删除外键约束
+SELECT * FROM information_schema.table_constraints WHERE table_name = '表名称';#查看某个表的约束名
+ALTER TABLE 从表名 DROP FOREIGN KEY 外键约束名;
+
+(2)第二步查看索引名和删除索引。（注意，只能手动删除）
+SHOW INDEX FROM 表名称; #查看某个表的索引名
+ALTER TABLE 从表名 DROP INDEX 索引名;
+```
+
+
+阿里开发规范
+[强制] 不得使用外键与级联，一切外键概念必须在应用层解决。 
+
+
+
+#----------------------------------------------------------#----------------------------------------------------------#
+# 视图(View)
+#----------------------------------------------------------#----------------------------------------------------------#
+
+常见的数据库对象
+
+| 对象                | 描述                                                         |
+| ------------------- | ------------------------------------------------------------ |
+| 表(TABLE)           | 表是存储数据的逻辑单元，以行和列的形式存在，列就是字段，行就是记录 |
+| 数据字典            | 就是系统表，存放数据库相关信息的表。系统表的数据通常由数据库系统维护，程序员通常不应该修改，只可查看 |
+| 约束(CONSTRAINT)    | 执行数据校验的规则，用于保证数据完整性的规则                 |
+| 视图(VIEW)          | 一个或者多个数据表里的数据的逻辑显示，视图并不存储数据       |
+| 索引(INDEX)         | 用于提高查询性能，相当于书的目录                             |
+| 存储过程(PROCEDURE) | 用于完成一次完整的业务处理，没有返回值，但可通过传出参数将多个值传给调用环境 |
+| 存储函数(FUNCTION)  | 用于完成一次特定的计算，具有一个返回值                       |
+| 触发器(TRIGGER)     | 相当于一个事件监听器，当数据库发生特定事件后，触发器被触发，完成相应的处理 |
+
+
+视图的理解
+- 视图是一种`虚拟表`，本身是`不具有数据`的，占用很少的内存空间，它是 SQL 中的一个重要概念。
+- **视图建立在已有表的基础上**, 视图赖以建立的这些表称为**基表**。
+- 视图的创建和删除只影响视图本身，不影响对应的基表。但是当对视图中的数据进行增加、删除和修改操作时，数据表中的数据会相应地发生变化，反之亦然。
+- 向视图提供数据内容的语句为 SELECT 语句, 可以将视图理解为**存储起来的** **SELECT** **语句** 
+- 在数据库中，视图不会保存数据，数据真正保存在数据表中。当对视图中的数据进行增加、删除和修改操作时，数据表中的数据会相应地发生变化；反之亦然。
+- 视图，是向用户提供基表数据的另一种表现形式。通常情况下，小型项目的数据库可以不使用视图，但是在大型项目中，以及数据表比较复杂的情况下，视图的价值就凸显出来了，它可以帮助我们把经常查询的结果集放到虚拟表中，提升使用效率。理解和使用起来都非常方便。
+
+
+创建视图
+# 在 CREATE VIEW 语句中嵌入子查询
+CREATE [OR REPLACE] 
+[ALGORITHM = {UNDEFINED | MERGE | TEMPTABLE}] 
+VIEW 视图名称 [(字段列表)]
+AS 查询语句
+[WITH [CASCADED|LOCAL] CHECK OPTION]
+
+# 对于单表
+```mysql
+mysql> CREATE VIEW empvu80
+AS 
+SELECT  employee_id, last_name, salary
+FROM    employees
+WHERE   department_id = 80;
+
+mysql> SELECT *
+FROM empvu80;
+```
+
+创建多表联合视图
+
+# 对于多表
+```mysql
+mysql> CREATE VIEW vu_emp_dept
+AS
+SELECT e.employee_id,e.department_id,d.department_name
+from employees e join departments d
+where e.department_id = d.department_id;
+```
+
+查看视图的属性信息
+```mysql
+# 查看视图信息（显示数据表的存储引擎、版本、数据行数和数据大小等）
+mysql> SHOW TABLE STATUS LIKE 'vu_emp_dept'\G
+```
+
+更新视图的数据
+mysql> select * from vu_emp_dept;
+
+# 一般情况
+MySQL支持使用INSERT、UPDATE和DELETE语句对视图中的数据进行插入、更新和删除操作。当视图中的数据发生变化时，数据表中的数据也会发生变化，反之亦然。
+
+# 不可更新的视图
+要使视图可更新，视图中的行和底层基本表中的行之间必须存在`一对一`的关系。另外当视图定义出现如下情况时，视图不支持更新操作：
+- 在定义视图的时候指定了“ALGORITHM = TEMPTABLE”, 视图将不支持INSERT和DELETE操作;
+- 视图中不包含基表中所有被定义为非空又未指定默认值的列, 视图将不支持INSERT操作;
+- 在定义视图的SELECT语句中使用了`JOIN联合查询`, 视图将不支持INSERT和DELETE操作;
+- 在定义视图的SELECT语句后的字段列表中使用了`数学表达式`或`子查询`, 视图将不支持INSERT, 也不支持UPDATE使用了数学表达式、子查询的字段值;
+- 在定义视图的SELECT语句后的字段列表中使用`DISTINCT`、`聚合函数`、`GROUP BY`、`HAVING`、`UNION`等, 视图将不支持INSERT、UPDATE、DELETE;
+- 在定义视图的SELECT语句中包含了子查询, 而子查询中引用了FROM后面的表, 视图将不支持INSERT、UPDATE、DELETE;
+- 视图定义基于一个`不可更新视图`;
+- 常量视图。
+
+#----------------------------------------------------------#----------------------------------------------------------#
+# 存储过程与函数
+#----------------------------------------------------------#----------------------------------------------------------#
+存储过程分类
+存储过程的参数类型可以是IN、OUT和INOUT。根据这点分类如下:
+1、没有参数(无参数无返回)
+2、仅仅带 IN 类型（有参数无返回）
+3、仅仅带 OUT 类型（无参数有返回）
+4、既带 IN 又带 OUT(有参数有返回)
+5、带 INOUT(有参数有返回)
+注意: IN、OUT、INOUT 都可以在一个存储过程中带多个。
+
+语法：
+```mysql
+CREATE PROCEDURE 存储过程名(IN|OUT|INOUT 参数名 参数类型,...)
+[characteristics ...]
+BEGIN
+	存储过程体
+END
+```
+
+
+
+
+#----------------------------------------------------------#----------------------------------------------------------#
+# 变量 流程控制与游标
+#----------------------------------------------------------#----------------------------------------------------------#
+
+
+
+
+
+#----------------------------------------------------------#----------------------------------------------------------#
+# 触发器
+#----------------------------------------------------------#----------------------------------------------------------#
+
+
+
+
+
+#----------------------------------------------------------#----------------------------------------------------------#
+# MySQL8其它新特性
+#----------------------------------------------------------#----------------------------------------------------------#
+
+
+
 
 
