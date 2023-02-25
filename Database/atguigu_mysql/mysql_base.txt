@@ -1,12 +1,17 @@
 备份数据库方式
 -- 创建一个和原表一样的备份表(包含索引)
-create table db_bak like db;
+create table table_bak like tb;
 
 -- 拷贝数据到备份表
-INSERT into db_bak select * from db;
+INSERT into table_bak select * from tb;
 
 -- 确认数据拷贝完成
-select * from db_bak;
+select * from table_bak;
+
+与上面结果相同!!!
+create table table_bak 
+AS
+select * from db.table;
 
 #----------------------------------------------------------#----------------------------------------------------------#
 ## MySQL权限管理和数据库备份
@@ -26,9 +31,8 @@ select * from db_bak;
 docker run --rm --name mysqldb -d -p 3306:3306 -e MYSQL_ROOT_PASSWORD=123456 mysql
 docker cp atguigudb.sql mysqldb:/
 docker exec -it mysqldb mysql -uroot -p123456
->source  /atguigudb.sql
->use atguigudb
->desc jobs; #查看table属性
+mysql> source  /atguigudb.sql
+mysql> use atguigudb
 
 >mysql -u{userName} -p{password} databaseName < backup_file #不推荐
 
@@ -908,8 +912,9 @@ MySQL支持使用INSERT、UPDATE和DELETE语句对视图中的数据进行插入
 - 视图定义基于一个`不可更新视图`;
 - 常量视图。
 
+
 #----------------------------------------------------------#----------------------------------------------------------#
-# 存储过程与函数
+# 存储过程与存储函数
 #----------------------------------------------------------#----------------------------------------------------------#
 存储过程分类
 存储过程的参数类型可以是IN、OUT和INOUT。根据这点分类如下:
@@ -929,7 +934,95 @@ BEGIN
 END
 ```
 
+创建存储过程
+# 查看 employees 所有数据
+```mysql
+mysql> delimiter $
+mysql> create procedure select_all_data()
+BEGIN
+	select * from employees;
+END $
+mysql> delimiter ;
 
+# 调用存储过程
+mysql> call select_all_data();
+```
+
+带 OUT
+```mysql
+# 查看表中参数类型
+mysql> desc employees; 
+
+mysql> delimiter //
+mysql> create procedure show_min_salary(OUT ms double)
+BEGIN
+    select min(salary) into ms from employees;
+END //
+mysql> delimiter ;
+
+# 调用存储过程
+mysql> call show_min_salary(@ms);
+
+# 查看变量值
+mysql> select @ms;
+```
+
+带 IN
+```mysql
+mysql> delimiter //
+mysql> create procedure show_someone_salary(IN empname varchar(20))
+BEGIN
+    select salary from employees where last_name = empname;
+END //
+mysql> delimiter ;
+
+# 调用方式一
+mysql> call show_someone_salary('Abel');
+
+# 调用方式二
+mysql> set @empname='Abel';
+mysql> call show_someone_salary(@empname);
+```
+
+带 IN 和 OUT
+```mysql
+mysql> delimiter //
+mysql> create procedure show_min_salary2(IN empname varchar(20), OUT empsalary DECIMAL(10,2))
+BEGIN
+    select salary into empsalary from employees where last_name = empname;
+END //
+mysql> delimiter ;
+
+# 调用存储过程
+mysql> set @empname='Abel';
+mysql> call show_min_salary2(@empname, @empsalary);
+mysql> call show_min_salary2('Abel', @empsalary);
+
+# 查看变量值
+mysql> select @empsalary;
+```
+
+带 INOUT
+```mysql
+mysql> delimiter //
+mysql> create procedure show_mgr_name(INOUT empname varchar(25))
+BEGIN
+    select last_name INTO empname from employees where employee_id = (
+        select manager_id from employees where last_name = empname
+    );
+END //
+
+mysql> delimiter ;
+
+mysql> set @empname := 'Abel';
+mysql> call show_mgr_name(@empname);
+mysql> select @empname;
+```
+
+删除存储过程
+```mysql
+mysql> DROP PROCEDURE show_mgr_name;
+```
 
 
 #----------------------------------------------------------#----------------------------------------------------------#
