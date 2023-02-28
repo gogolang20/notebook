@@ -1019,17 +1019,222 @@ mysql> call show_mgr_name(@empname);
 mysql> select @empname;
 ```
 
-删除存储过程
+存储函数的使用
 ```mysql
-mysql> DROP PROCEDURE show_mgr_name;
+# 语法格式
+CREATE FUNCTION 函数名(参数名 参数类型,...) 
+RETURNS 返回值类型
+[characteristics ...]
+BEGIN
+	函数体   #函数体中肯定有 RETURN 语句
+END
+```
+说明：
+1、参数列表: 指定参数为IN、OUT或INOUT只对PROCEDURE是合法的, FUNCTION中总是默认为IN参数。
+2、RETURNS type 语句表示函数返回数据的类型；
+RETURNS子句只能对FUNCTION做指定, 对函数而言这是`强制`的。它用来指定函数的返回类型，而且函数体必须包含一个`RETURN value`语句。
+3、characteristic 创建函数时指定的对函数的约束。取值与创建存储过程时相同，这里不再赘述。
+4、函数体也可以用BEGIN…END来表示SQL代码的开始和结束。如果函数体只有一条语句, 也可以省略BEGIN…END。
+
+
+```mysql
+mysql> DELIMITER //
+
+mysql> CREATE FUNCTION email_by_name()
+RETURNS VARCHAR(25)
+DETERMINISTIC
+CONTAINS SQL
+BEGIN
+	RETURN (SELECT email FROM employees WHERE last_name = 'Abel');
+END //
+
+mysql> DELIMITER ;
+
+mysql> select email_by_name();
 ```
 
+```mysql
+DELIMITER //
+
+CREATE FUNCTION email_by_id(emp_id INT)
+RETURNS VARCHAR(25)
+DETERMINISTIC
+CONTAINS SQL
+BEGIN
+	RETURN (SELECT email FROM employees WHERE employee_id = emp_id);
+END //
+
+DELIMITER ;
+
+mysql> select email_by_id(100);
+```
+
+```mysql
+DELIMITER //
+
+CREATE FUNCTION count_by_id(dept_id INT)
+RETURNS INT
+	LANGUAGE SQL
+	NOT DETERMINISTIC
+	READS SQL DATA
+	SQL SECURITY DEFINER
+	COMMENT '查询部门 avg salary'
+BEGIN
+	RETURN (SELECT COUNT(*) FROM employees WHERE department_id = dept_id);
+END //
+
+DELIMITER ;
+
+SET @dept_id = 50;
+SELECT count_by_id(@dept_id);
+```
+
+解决报错: `you might want to use the less safe log_bin_trust_function_creators variable`
+mysql> SET GLOBAL log_bin_trust_function_creators = 1;
+
+对比存储函数和存储过程
+
+|          | 关键字    | 调用语法        | 返回值            | 应用场景                         |
+| -------- | --------- | --------------- | ----------------- | -------------------------------- |
+| 存储过程 | PROCEDURE | CALL 存储过程() | 理解为有0个或多个 | 一般用于更新                     |
+| 存储函数 | FUNCTION  | SELECT 函数()   | 只能是一个        | 一般用于查询结果为一个值并返回时 |
+
+此外，**存储函数可以放在查询语句中使用，存储过程不行**。反之，存储过程的功能更加强大，包括能够执行对表的操作（比如创建表，删除表等）和事务操作，这些功能是存储函数不具备的。
+
+
+存储过程和函数的查看、修改、删除
+查看
+```mysql
+# 方式一
+mysql> SHOW CREATE PROCEDURE show_mgr_name \G
+mysql> SHOW CREATE FUNCTION count_by_id \G
+
+# 方式二
+mysql> SHOW PROCEDURE status\G
+mysql> SHOW PROCEDURE status like 'show_mgr_name'\G
+
+mysql> SHOW FUNCTION status\G
+mysql> SHOW FUNCTION status like 'count_by_id' \G
+
+# 方式三
+# 从information_schema.Routines表中查看存储过程和函数的信息
+mysql> SELECT * FROM information_schema.Routines
+WHERE ROUTINE_NAME='count_by_id' AND ROUTINE_TYPE = 'FUNCTION' \G
+```
+
+修改 # 不能修改函数体, 只能修改特性
+```mysql
+# 语法
+ALTER {PROCEDURE | FUNCTION} 存储过程或函数的名 [characteristic ...]
+
+{ CONTAINS SQL | NO SQL | READS SQL DATA | MODIFIES SQL DATA }
+| SQL SECURITY { DEFINER | INVOKER }
+| COMMENT 'string'
+```
+- `CONTAINS SQL`, 表示子程序包含SQL语句, 但不包含读或写数据的语句。
+- `NO SQL`, 表示子程序中不包含SQL语句。
+- `READS SQL DATA`，表示子程序中包含读数据的语句。
+- `MODIFIES SQL DATA`，表示子程序中包含写数据的语句。
+- `SQL SECURITY { DEFINER | INVOKER }`，指明谁有权限来执行。
+  - `DEFINER`，表示只有定义者自己才能够执行。
+  - `INVOKER`，表示调用者可以执行。
+- `COMMENT 'string'`，表示注释信息。
+> 修改存储过程使用ALTER PROCEDURE语句,修改存储函数使用ALTER FUNCTION语句。但是,这两个语句的结构是一样的，语句中的所有参数也是一样的。
+
+
+删除
+```mysql
+# 删除存储过程
+DROP PROCEDURE [if exists] 存储名称;
+mysql> DROP PROCEDURE show_mgr_name;
+```
 
 #----------------------------------------------------------#----------------------------------------------------------#
 # 变量 流程控制与游标
 #----------------------------------------------------------#----------------------------------------------------------#
+查看系统变量
+- **查看所有或部分系统变量**
+```mysql
+# 查看所有全局变量
+SHOW GLOBAL VARIABLES\G
 
+# 查看所有会话变量
+SHOW SESSION VARIABLES\G
+或
+SHOW VARIABLES\G
 
+mysql> SHOW GLOBAL VARIABLES LIKE 'admin_%'\G
+mysql> SHOW SESSION VARIABLES LIKE 'character_%'\G
+
+# 查看指定系统变量
+mysql> select @@global.max_connections;
+mysql> select @@session.character_set_client;
+mysql> select @@session.pseudo_thread_id;
+
+# 修改系统变量的值
+# 为某个系统变量赋值
+# 方式1
+SET @@global.变量名=变量值;
+mysql> SET @@global.max_connections=161;
+# 方式2
+SET GLOBAL 变量名=变量值;
+mysql> SET GLOBAL max_connections=171;
+
+# 为某个会话变量赋值
+# 方式1
+SET @@session.变量名=变量值;
+mysql> SET @@session.character_set_client='gbk';
+# 方式2
+SET SESSION 变量名=变量值;
+mysql> SET SESSION character_set_client='utf8mb4';
+```
+
+用户变量
+# 用户变量分类
+用户变量是用户自己定义的，作为 MySQL 编码规范, MySQL 中的用户变量以`一个“@”`开头。根据作用范围不同，又分为`会话用户变量`和`局部变量`。
+- 会话用户变量：作用域和会话变量一样，只对`当前连接`会话有效。
+- 局部变量：只在 BEGIN 和 END 语句块中有效。局部变量只能在`存储过程和函数`中使用。
+
+会话用户变量
+- 变量的定义
+```mysql
+#方式1: “=”或“:=”
+SET @用户变量 = 值;
+SET @用户变量 := 值;
+mysql> SET @a = 1;
+mysql> SET @b = 2;
+mysql> SET @c = @a + @b;
+mysql> SELECT @c;
+
+#方式2: “:=” 或 INTO关键字
+SELECT @用户变量 := 表达式 [FROM 等子句];
+mysql> SELECT @count := count(*) from employees;
+mysql> select @count;
+
+SELECT 表达式 INTO @用户变量  [FROM 等子句];
+mysql> SELECT avg(salary) INTO @avg_sal from employees;
+mysql> select @avg_sal;
+```
+
+局部变量
+定义：可以使用`DECLARE`语句定义一个局部变量
+作用域：仅仅在定义它的 BEGIN ... END 中有效
+位置：只能放在 BEGIN ... END 中，而且只能放在第一句
+```mysql
+DECLARE 变量名 类型 [default 值];  # 如果没有DEFAULT子句, 初始值为NULL
+# DECLARE myparam INT DEFAULT 100;
+```
+
+流程控制
+解决复杂问题不可能通过一个 SQL 语句完成，我们需要执行多个 SQL 操作。流程控制语句的作用就是控制存储过程中 SQL 语句的执行顺序，是我们完成复杂操作必不可少的一部分。只要是执行的程序，流程就分为三大类：
+- `顺序结构`：程序从上往下依次执行
+- `分支结构`：程序按条件进行选择执行，从两条或多条路径中选择一条执行
+- `循环结构`：程序满足一定条件下，重复执行一组语句
+
+针对于MySQL 的流程控制语句主要有 3 类。注意：只能用于存储程序。
+- `条件判断语句`: IF 语句和 CASE 语句
+- `循环语句`: LOOP、WHILE 和 REPEAT 语句
+- `跳转语句`: ITERATE 和 LEAVE 语句
 
 
 
