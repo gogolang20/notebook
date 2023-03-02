@@ -1,0 +1,345 @@
+高并发负载均衡
+
+## 网络协议原理
+
+7层OSI网络模型
+
+```shell
+cd /proc/$$/fd 
+pwd  
+ll  #可以查看到输入输出文件描述符
+
+#建立连接后,才会有有效数据的传输
+exec 8<> /dev/tcp/www.baidu.com/80  
+echo -e "GET / HTTP/1.0\n" >& 8   
+exec 8<& -(关闭)
+
+exec 8<> /dev/tcp/www.baidu.com/80  
+echo -e "GET / HTTP/1.0\n" >& 8
+cat 0<& 8	#请求回百度主页
+
+#三次握手:建立面向链接的可靠传输协议；四次挥手！！！
+
+netstat -natp   #IP地址显示方式 all tcp PID
+netstat -tulpn  
+```
+
+```
+vim /etc/sysconfig/network-scripts/ifcfg-ens33
+
+IPADDR:IP地址,三类IP地址,最后一位数字是主机位
+
+NETMASk(掩码):和IP地址做按位与运算 得到网络号；判定成功后走对应的网关出去
+
+GATEWAY:网关
+
+DNS:域名解析
+```
+
+下一跳机制:路由器做路由判定下一跳的地址,然后转发
+
+```shell
+route -n 可以查看路由条目
+ping:ICMP协议
+ping www.baidu.com
+
+arp -a #查看网卡的MAC地址
+```
+
+## LVS的DR TUN NAT模型推导
+
+首次通信之前 ARP目标MAC地址:FFFFFF 进行广播
+
+```shell
+ifconfig ens33:8  192.168.152.166/24 #添加一张网卡
+route add -host 192.168.88.88 gw 192.168.152.13 #添加路由条目
+route del -host 192.168.88.88 #删除路由条目
+主机需要精确匹配,添加主机不需要给出网络位
+```
+
+高并发的IP问题(通信),客户端与服务器之前需要添加一层做负载均衡
+
+四层负载均衡:接收固定Port的数据包,所以是四层
+
+先用LVS(4层,不握手,但是查看包的端口号)负载均衡服务器 hold流量(后端服务器是镜像的)
+
+后面用 nginx 反向代理服务器握手(7层 官方大约5万个连接)
+
+
+
+### NAT网络模型(网络地址转换)
+
+S-NAT(源地址转换协议):局域网连接公网
+
+路由器封存自己不同的端口号区分发送出去的 局域网内每台主机IP:port
+
+D-NAT(目标地址转换协议):负载均衡服务器
+
+
+
+NAT网络模型瓶颈:
+
+1 带宽瓶颈,非对称,请求的数据包比较小,回复的包比较大
+
+2 来回的地址转化消耗算力
+
+ 
+
+### DR网络模型
+
+直接路由模型(ARP协议修改)
+真实服务器添加一个隐藏的对外不可见,对内可见的负载均衡服务器IP地址；真实服务器信息不通过负载均衡服务器返回,而是直接返回给客户端,解决算力消耗与带宽问题
+但是需要考虑换MAC地址才能让真实服务器收到包,同时负载均衡服务器与真实服务器必须在同一局域网内。
+负载均衡服务器将收到的MAC地址替换成真实服务器RIP的MAC地址,转发的IP不改变,由于服务器端设置了隐藏的负载均衡服务器IP地址,服务器端可以直接接收处理
+
+优点:速度快,成本低
+缺点:不可以跨网络,动的是二层链路层MAC地址
+
+
+
+### TUN 模型
+
+解决物理空间位置问题,数据包背着数据包走
+在真实数据数据包外在封一层IP地址
+应用场景:VPN
+
+
+## LVS的DR模型试验搭建
+
+负载均衡是将并发分治,实际没有提升带宽
+网络层IP:DIP(负载均衡分发IP) RIP(服务器真实IP) VIP(负载均衡虚拟IP)
+
+
+ARP文件的网卡配置不可以使用vim编辑器修改,需要通过echo命令修改
+arp_ignor 参数默认是0:定义接收到ARP请求的**响应级别**
+arp_announce参数默认是0:定义将自己地址向外通告时的**通告级别**
+计算机可以有多块网卡,修改网卡配置 MAC地址对外隐藏,对内可见
+Linux系统一般有两张网卡 lo(loopback,虚拟的网卡)和 ens33(物理网卡),如何配置达到需要的效果？
+
+- lo接口与外界时不连通的(适合配置VIP)
+
+
+
+### 负载均衡调度算法
+
+四种静态 :rr 轮询; wrr; dh; sh
+
+动态调度算法:lc最少连接；wlc；sed；nq；LBLC；DH；LBLCR
+
+负载均衡服务器如何知道真实服务器与客户端的连接数？这样才能调度
+
+负载均衡服务器记录握手/分手包
+
+### LVS搭建
+```shell
+LVS机器分布
+node1	192.168.152.128		LVS节点
+node2	192.168.152.133		从节点
+node3	192.168.152.134		从节点
+
+LVS是Linux中的ipvs内核模块
+yum install -y ipvsadm
+```
+
+```shell
+yum install -y net-tools
+LVS节点:
+ifconfig  ens33:2 192.168.152.100/24 
+ifconfig  ens33:2 down #可以关闭,配置错误时使用
+
+从节点node2
+cd /proc/sys/net/ipv4/conf/ens33
+echo 1 > arp_ignore 
+echo 2 > arp_announce
+cd /proc/sys/net/ipv4/conf/all
+echo 1 > arp_ignore 
+echo 2 > arp_announce
+ifconfig lo:2 192.168.152.100 netmask 255.255.255.255 #添加VIP
+从节点node3
+echo 1 > /proc/sys/net/ipv4/conf/ens33/arp_ignore 
+echo 2 > /proc/sys/net/ipv4/conf/ens33/arp_announce
+echo 1 > /proc/sys/net/ipv4/conf/all/arp_ignore 
+echo 2 > /proc/sys/net/ipv4/conf/all/arp_announce
+ifconfig lo:2 192.168.152.100 netmask 255.255.255.255 #注意掩码 包会优先进lo网卡
+
+从节点node2和node3
+yum install -y httpd
+systemctl start httpd #启动httpd服务
+vi /var/www/html/index.html
+	<h1> from 192.168.152.13X  </h1>
+宿主机浏览器访问 192.168.152.13X 可以查看内容
+
+LVS节点:
+yum install -y ipvsadm #安装软件
+ipvsadm -A -t 192.168.152.100:80  -s rr #配置入口包规则
+ipvsadm -ln #查看配置的入口规则
+ipvsadm -a -t 192.168.152.100:80  -r 192.168.152.133  -g -w 1
+ipvsadm -a -t 192.168.152.100:80  -r 192.168.152.134  -g -w 1
+ipvsadm -ln
+
+http://192.168.152.100/ #刷新可以访问到负载的不同主页内容
+netstat -natp # 看不到socket连接
+ipvsadm -lnc #可以查看负载记录
+
+FIN_WAIT #链接过,有记录包
+SYN_RECV #LVS没有问题,证明后面网络层出问题了
+
+从节点node2和node3
+netstat -natp #可以查看socket连接
+
+不是持久化的设置,重启后需要重新设置
+
+ipvsadm --save > /etc/sysconfig/ipvsadm
+```
+
+```shell
+ipvsadm -A -t 192.168.245.100:80 -s rr 
+ipvsadm -a  -t 192.168.245.100:80 -r 192.168.245.133  -g  -w 1 
+ipvsadm -a  -t 192.168.245.100:80 -r 192.168.245.134  -g  -w 1 
+-A 进包规则
+-a 负载规则
+-t TCP协议
+-s rr 调度方式 轮询
+-g 轮询
+-w 1 权重
+192.168.245.100:80 分发IP:端口
+192.168.245.133 真实服务器地址
+192.168.245.134 真实服务器地址
+```
+
+
+
+## 基于keepalived的LVS高可用搭建
+
+nginx:基于反向代理的 负载均衡,先握手再负载,服务返回也是要过nginx
+
+
+
+LVS负载均衡器可能会挂,单点故障
+
+真实服务器也可能挂,一部分用户会请求异常,LVS还存有这个真实服务器的负载记录,所以还会继续分发数据
+
+如何解决？
+
+LVS单点故障:一变多
+
+- 主备(HA高可用)
+- 主主:借助DNS实现
+
+主备模式如何确定主节点是否正常
+
+- 备用机主动询问健康检查
+- 主节点主动通告
+
+何如确定真实服务器挂了:访问一下,ping只能检测到网络层
+
+
+
+```shell
+keepalived实验:
+
+LVS机器分布
+node1	192.168.152.128		LVS节点
+node2	192.168.152.133		从节点
+node3	192.168.152.134		从节点
+node4	192.168.152.135		LVS备用节点
+
+LVS节点
+ipvsadm -C #清楚ipvsadm配置
+ifconfig  ens33:2 down #清除IP配置
+
+从节点没有关机就不用再配置
+
+LVS节点 和 LVS备用节点 安装keepalived ipvsadm
+yum install -y keepalived
+#配置文件
+cd /etc/keepalived/
+cp keepalived.conf keepalived.conf.bak #备份配置文件
+vim keepalived.conf
+	配置文件中 vrrp 虚拟路由冗余协议
+yum install -y man
+
+man 5 keepalived.conf #查看man 帮助文档
+persistence_granularity <NETMASK>
+persistence_granularity 255.255.255.0
+
+d + G #删除光标位置后面的内容
+shift: #选择光标
+.,$-1y #从光标位置向下复制到倒数第二行
+
+scp ./keepalived.conf  root@192.168.152.135:`pwd` #远程拷贝到LVS备用节点 pwd使用的反引号
+
+删除原配置文件以下部分
+   vrrp_skip_check_adv_addr
+   vrrp_strict
+   vrrp_garp_interval 0
+   vrrp_gna_interval 0
+```
+
+
+```shell
+LVS节点 keepalived.conf 配置文件
+
+global_defs {
+   notification_email {
+     acassen@firewall.loc
+     failover@firewall.loc
+     sysadmin@firewall.loc
+   }
+   notification_email_from Alexandre.Cassen@firewall.loc
+   smtp_server 192.168.200.1
+   smtp_connect_timeout 30
+   router_id LVS_DEVEL
+}
+
+vrrp_instance VI_1 {
+    state MASTER	#node4  BACKUP
+    interface ens33	#修改成主机的网卡名
+    virtual_router_id 51
+    priority 100	#node4  50
+    advert_int 1
+    authentication {
+        auth_type PASS
+        auth_pass 1111
+    }
+    virtual_ipaddress {
+        192.168.152.100/24 dev ens33  label ens33:2
+    }
+}
+
+virtual_server 192.168.152.100 80 {
+    delay_loop 6
+    lb_algo rr
+    lb_kind DR
+    persistence_timeout 0
+    persistence_granularity 255.255.255.0
+    protocol TCP
+
+    real_server 192.168.152.133 80 {
+        weight 1
+        HTTP_GET {
+            url {
+              path /
+                status_code 200
+            }
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+    real_server 192.168.152.134 80 {
+        weight 1
+        HTTP_GET {
+            url {
+              path /
+                status_code 200
+            }
+            connect_timeout 3
+            nb_get_retry 3
+            delay_before_retry 3
+        }
+    }
+}
+```
+
+LVS结点的keepalived异常退出后,VIP和协议转发还会继续保留。备用机的keepalived会启动,导致VIP重复暴露,数据包会混乱

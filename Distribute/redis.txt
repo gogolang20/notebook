@@ -1,0 +1,861 @@
+
+# 二 redis
+
+## 一些常识
+
+磁盘	1: 寻址 ms  2:带宽 G/m
+
+内存	1:寻址 ns  2:带宽 很大
+
+秒>毫秒>微秒>纳秒	内存寻址速度比磁盘快10w倍
+
+I/O buffer :成本问题
+
+磁盘与磁道,扇区:一扇区512Byte带来一个成本变大
+
+索引4K操作系统,无论读多少,都是最少4K从磁盘拿
+
+ 
+
+数据库表很大,性能是否下降？
+
+如果表有索引,增删改 变慢。
+
+查询速度呢？
+
+1:一个或少量查询依旧很快  2:并发大的时候会受磁盘带宽影响速度
+
+
+
+### Epoll
+
+Linux重定向:0是标准输入 1是标准输出 2是错误输出
+
+```shell
+#查看redis fd文件描述符
+ps -ef | grep redis
+cd /proc/redis PID/fd
+ll
+
+yum install -y man man-apges #第二类是系统调用类
+man 2 read
+man 2 select
+man 7 epoll
+man 2 mmap
+man 2 sendfile #zero copy 零拷贝
+```
+
+
+
+## redis 查看帮助
+
+```shell
+命令行启动redis客户端
+ps -ef | grep redis #查看启动的金进程
+redis-cli #默认启动6379端口
+redis-cli -h #查看帮助文档
+redis-cli -p 6380
+
+redis默认有16个库 启动redis客户端后
+select 8 #选择8号库
+redis-cli -p 6380 -n 8 #连接时直接进入8号库
+
+help 查看帮助的使用格式
+help @string	按tab键可以补齐、切换命令
+```
+
+
+
+## redis 的string&bitmap
+
+redis中的string可以理解成byte 
+
+- 字符串
+- 数值
+- 位图
+
+```shell
+set k1 hello 
+get k1
+#适用场景:分布式锁
+set k1 ooxx nx #nx 表示不存在时设置
+get k1
+set k2 hello xx #xx 只有存在时才能设置
+get k2 #nil
+
+mset k3 v3 k4 v4
+mget k3 k4
+
+set k1 "hello"
+append k1 " world"
+get k1
+"hello world"
+GETRANGE k1 0 -1 #redis正向索引从0开始,反向索引从-1开始！！！
+"hello world"
+SETRANGE k1 6 ssssssss
+get k1 
+"hello ssssssss"
+STRLEN k1
+(integer) 14
+
+type k1 描述key的类型
+set k2 11
+OBJECT encoding k2
+INCR k2
+get k2 
+"12"
+DECR k2
+DECRBY k2 3
+INCRBYFLOAT k2 0.6
+
+OBJECT encoding k1
+APPEND k1 ccc
+get k1 
+"hello ssssssssccc"
+
+
+二进制安全:只取字节流,一个字符一个字节。Hbase也是二进制安全
+FLUSHALL
+set k1 hello
+STRLEN k1
+(integer) 5
+set k2 9 
+OBJECT encoding k2
+STRLEN k2
+(integer) 1 
+APPEND k2 999
+get k2
+OBJECT encoding k2 
+INCR k2
+OBJECT encoding k2
+STRLEN k2
+(integer) 5
+
+set k3 a
+STRLEN k3 #(integer) 1
+APPEND k3 中 
+STRLEN k3 #(integer) 4
+get k3 #"a\xe4\xb8\xad"
+存储的数据未编码,不同的数据类型在不同语言占用空间大小是不固定的。
+
+退出redis 
+redis-cli --raw #编码集格式化 再次进入
+修改编码集后,可能会输出不同的结果
+
+GETSET #Set the string value of a key and return its old value #可以减少io
+MSETNX #Set multiple keys to multiple values, only if none of the keys exist #原子性操作,全部设置成功,结果返回成功
+
+位图
+二进制位 字节和二进制 下标都是从左向右 0-N
+SETBIT #Sets or clears the bit at offset in the string value stored at key
+SETBIT k1 1 1
+get k1 # "@"
+SETBIT k1 7 1
+get k1 # "A"
+SETBIT k1 9 1
+get k1 # "A@"
+BITCOUNT #Count set bits in a string
+BITPOS #Find first bit set or clear in a string
+BITPOS k1 1 0 0 # (integer) 1 #最后两位代表字节下标
+BITPOS k1 1 1 1 # (integer) 9 #返回在全量的二级制位的位置
+BITOP #Perform bitwise operations between strings
+
+FLUSHALL 
+SETBIT k1 1 1
+SETBIT k1 7 1
+get k1 # "A"
+SETBIT k2 1 1
+SETBIT k2 1 1
+get k2 # "B"
+BITOP and andkey k1 k2 #k1 和k2 做按位与运算,结果保存到andkey 中了
+get andkey # "@"
+BITOP or orkey k1 k2
+get orkey # "C"
+
+位图应用场景
+统计用户登录天数,且窗口随机 #参考图片
+
+活跃用户筛选 #参考图片
+SETBIT 20210729 1 1
+SETBIT 20210730 1 1
+SETBIT 20210730 7 1
+BITOP or destkey 20210729 20210730
+BITCOUNT destkey 0 -1
+```
+
+
+
+## Redis的list、set、hash、sorted_set、skiplist
+
+### list
+
+```shell
+插入有序
+#结构可以是栈 同向命令
+lpush k1 a b c d e f 
+lpop k1 # "e" 
+
+#结构可以是队列 反向命令
+rpush k2 a b c d e f
+lpop k2 # "a"
+
+LRANGE k2 0 -1 #列出list
+
+LINDEX #Get an element from a list by its index
+LSET #Set the value of an element in a list by its index
+LREM #Remove elements from a list #正数移除正向个数 负数移除反向个数
+LINSERT #Insert an element before or after another element in a list
+
+LLEN #Get the length of a list
+
+阻塞的单播队列:先进先出,先阻塞的先收到数据
+BLPOP #Remove and get the first element in a list, or block until one is available #阻塞的弹出元素
+
+LTRIM #Trim a list to the specified rang
+
+```
+
+
+
+### hash
+
+```shell
+设置k v,获取k v
+HSET sean name sss
+HMSET sean age 18 addr js
+
+hget sean age
+HMGET sean name age
+HKEYS sean
+HVALS sean
+HGETALL sean
+
+计算
+HINCRBYFLOAT sean age 0.5
+HGET sean age
+HINCRBYFLOAT sean age -1.5
+
+```
+
+### set
+
+```shell
+去重,不维护排序,不维护元素的插入和弹出顺序
+FLUSHDB
+SADD k1 tom sean peter ooxx tom xxoo #(integer) 5 有去重
+SMEMBERS k1
+
+交并差集
+SINTER k2 k3 #交集
+SINTERSTORE dest k2 k3 # 存储到 dest,没有发生io
+SMEMBERS dest 
+SUNION k2 k3 #并集
+SDIFF #差集 有方向
+SDIFF k2 k3
+SDIFF k3 k2
+
+随机抽奖
+SRANDMEMBER #Get one or multiple random members from a set #详解查看图
+SRANDMEMBER k1 5 -5 10 -10 #正数取出一个去重的结果集 负数是可以有重复的
+
+SPOP #Remove and return one or multiple random members from a set
+
+```
+
+
+
+### sorted_set
+
+```shell
+help @sorted_set
+key的元素所代表的某一属性分值进行排序,元素有反向索引
+ZADD #Add one or more members to a sorted set, or update its score if it already exists
+物理内存左小右大
+ZADD k1 8 apple 2 banana 3 orange
+ZRANGE k1 0 -1 
+ZRANGE k1 0 -1 withscores
+ZrevRANGE k1 0 -1 #反向
+ZSCORE k1 apple #根据分数
+ZRANk k1 apple #根据排名
+ZINCRBY k1 2.5 banana # "4.5"
+
+ZUNIONSTORE #Add multiple sorted sets and store the resulting sorted set in a new key #集合操作
+
+```
+
+sorted_set如何实现快速排序？数据是链表
+
+底层的存储结构:skiplist
+
+牺牲一定的存储空间,换取查询的速度
+
+新元素是否添加层是随机的
+
+类平衡树
+
+速度问题:需要数据达到一定量,平均性能是最优的
+
+
+
+## Redis消息订阅、pipeline、事务、modules、布隆过滤器、缓存LRU
+
+redis作为 数据库 或者 缓存
+
+
+
+### 消息订阅、pipeline、事务
+
+```shell
+cd /etc/redis
+vim 6379.conf #修改redis配置文件
+
+开启一个redis-cli
+在开启一个nc
+yum install -y nc
+nc localhost 6379 #与本地6379 端口建立连接
+keys *
+set k1 hello
+
+redis-cli:
+get k1
+
+pipeline管道
+echo -e "asdfa\nasdfa" # -e识别换行符
+echo -e "set k2 99\n incr k2\n get k2" | nc localhost 6379
+
+redis-cli:
+get k2
+冷启动概念
+
+发布订阅
+help @pubsub
+PUBLISH sss hello
+SUBSCRIBE sss #监听之后,可以收到PUBLISH 发送的消息,监听之前的数据是收不到的
+聊天室消息如何存储数据？？？关系型数据库 or redis？？？
+可以按时间选择数据存储的位置
+
+redis事务
+redis是单进程,一个客户端的事务不会阻塞另一个客户端
+事务方面看哪个客户端的exec命令先到达,就先执行谁的
+Watch命令 Redis 还可以通过乐观锁(optimistic lock)实现 CAS (check-and-set)操作
+
+help @transactions
+MULTI #Mark the start of a transaction block
+EXEC #Execute all commands issued after MULTI
+WATCH #Watch the given keys to determine execution of the MULTI/EXEC block
+
+MULTI
+set k1 aaa
+set k2 bbb
+exec
+可以开启两个客户端,各自开启事务
+一个get k1 另一个 del k1 
+先 exec del的客户端执行成功,get会失败
+
+```
+
+### 布隆过滤器
+
+RedisBloom:https://github.com/RedisBloom/RedisBloom
+
+```shell
+/root/bf
+#yum install -y unzip
+wget https://github.com/RedisBloom/RedisBloom/archive/refs/tags/v2.2.4.tar.gz
+tar -zxvf v2.2.4.tar.gz
+cd RedisBloom-2.2.4/
+make #编译
+cp redisbloom.so /opt/redis/redis5/
+cd /opt/redis/redis5
+
+systemctl stop redis_6379
+redis-cli -p 6379 #指定端口登录redis客户端
+
+启动
+redis-server  --loadmodule  /opt/redis/redis5/redisbloom.so  
+解决缓存穿透问题,搜索到缓存和数据库都没有的信息
+还是有一定概率穿透,不可能百分百阻挡, 降低到<1%
+
+BF.ADD sss aaa #(integer) 1
+BF.EXISTS sss aaa #(integer) 1
+BF.EXISTS sss bbb #(integer) 0
+
+拓展布谷鸟过滤器
+
+有新的key,需要写入redis和布隆过滤器,可能出现双写问题！！！
+```
+
+
+
+### 缓存LRU
+
+redis作为缓存,缓存应该随着访问变化热数据,redis中的数据如何只随着业务变化,只保留热数据？？？内存大小是有限的,也就是瓶颈
+
+- 业务逻辑		key的有效期
+
+- 业务运转		内存有限,随着访问变化,应该淘汰冷数据
+
+  
+
+```shell
+配置文件注意选项
+vim /etc/redis/6379.conf
+maxmemory <bytes>
+maxmemory-policy noeviction
+lfu 最少使用,次数
+lru 最久未使用,时间
+
+1 业务运转		内存有限,随着访问变化,应该淘汰冷数据
+allkeys-lru: 尝试回收最少使用的键(LRU),使得新添加的数据有空间存放。
+volatile-lru: 尝试回收最少使用的键(LRU),但仅限于在过期集合的键,使得新添加的数据有空间存放。
+
+
+2 业务逻辑		key的有效期
+set k1 aaa ex 10 #设置时间有效期
+ttl k1 #查看key过期时间
+
+发生写之后,会剔除过期时间
+set k1 aaa
+EXPIRE k1 30
+set k1 bbb
+
+倒计时,且redis不能延长
+EXPIREAT #Set the expiration for a key as a UNIX timestamp
+
+定时
+
+业务逻辑需要程序补全
+```
+
+缓存常见四个问题？
+
+- 击穿
+- 雪崩
+- 穿透
+- 缓存一致性(双写)
+
+
+
+## Redis的持久化RDB、fork、copyonwrite、AOF、RDB&AOF混合使用
+
+数据持久化	存储层:快照/副本；日志
+
+RDB redis DB:快照/副本
+
+AOF:日志
+
+```shell
+Linux系统 管道 |
+管道会触发子进程
+eg:
+num = 0
+echo $num
+((num++))
+echo $num # 1
+((num++)) | echo ok
+echo $num # 1
+echo $$ #父进程
+echo $$ | more #父进程
+echo $BASHPID #父进程
+echo $BASHPID | more #子进程 PID
+$$ 优先级高于 |
+父进程的数据子进程是否可以看到？？？
+父进程的数据可以让子进程看到
+子进程的修改不会破坏父进程
+父进程的修改不会破坏子进程
+
+num=1
+echo $$
+/bin/bash #进入一个子进程
+yum -y install psmisc #pstree命令
+export num
+/bin/bash #再次进入子进程
+echo num #可以取出 父进程num数据
+
+./test.sh & #后台运行脚本
+
+开创子进程的速度和内存空间够不够？？？
+fork子进程写数据到数据库中
+man 2 fork #fork - create a child process
+fork 速度快,空间小
+Linux,  fork() is implemented using copy-on-write pages
+copyonwrite #写时复制 创建子进程并不发生复制 
+
+RDB命令:
+save
+bgsave --> fork创建子进程
+配置文件中给出bgsave的规则,配置文件使用的save标识
+
+什么时候使用save？？？场景明确:关机维护
+
+redis配置文件选项
+save <seconds> <changes> #SNAPSHOTTING
+save 900 1
+save 300 10
+save 60 10000
+
+```
+
+
+
+RDB的弊端:只有一个dump.rdb；丢失数据相对多一些
+
+RDB的优点:数据恢复速度相对较快
+
+
+
+AOF append only file:redis的写操作记录到文件中
+
+AOF 丢失数据少,日志文件大,恢复慢
+
+```
+RDB+AOF恢复数据:
+RDB和AOF 可以同时开启,但是恢复只会使用AOF 
+redis是内存数据库-->写操作会触发io
+可以调整写io三个级别:no；always;；everysec
+
+redis配置文件相关:
+appendonly yes #no
+appendfilename "appendonly.aof"
+
+# appendfsync always
+appendfsync everysec 
+# appendfsync no
+
+no-appendfsync-on-rewrite no #数据敏感性
+
+aof-use-rdb-preamble yes #数据恢复模式
+
+
+/var/lib/redis/6379 #redis日志文件位置
+redis-check-rdb dump.rdb #检查文件
+
+演示:
+daemonize no 关闭后台运行 
+aof-use-rdb-preamble no 关闭混合模式
+redis-server /etc/redis/6379.conf #重新启动redis-server
+set k1 1
+set k1 2
+set k1 3
+BGREWRITEAOF #redis重写命令,执行后产生dump.rdb 文件
+查看日志文件
+
+auto-aof-rewrite-percentage 100	
+auto-aof-rewrite-min-size 64mb	自动重写配置
+```
+
+
+
+## Redis的集群:主从复制、CAP、PAXOS、cluster分片集群
+
+redis单机问题:单点故障；容量有限；连接数压力
+
+### AKF
+
+```
+AKF:微服务业务拆分四个原则的第一项
+X轴:全量,镜像
+多个redis 主备 读写分离 可用性 解决单点故障方案
+Y轴:业务,功能 高内聚 低耦合 性能提高
+解决容量有限方案(MySQL的分库)
+Z轴:优先级,逻辑再拆分 sharding 通过代理实现分治
+
+主备-->数据一致性问题？
+强一致性:同步阻塞,会破坏可用性
+弱一致性:会丢失数据
+最终一致性:最终数据会一致
+
+高可用:对主做高可用,服务对外表现一致
+
+CAP原理:一致性,可用性,分区容错性
+无法三个同时实现
+```
+
+Redis使用默认的异步复制,其特点是低延迟和高性能
+
+
+
+### 主从复制
+
+```shell
+主从复制
+演示:一台虚拟机准备三个redis
+mkdir /root/test
+cd /root/test
+cd /root/redis-5.0.12/utils
+./install_server.sh #再添加一个6381
+systemctl stop redis_6381
+
+cd /root/test
+cp /etc/redis/* ./ #拷贝配置文件副本到test文件夹下
+修改部分:前台阻塞运行,没有AOF
+vim 6379.conf
+	daemonize no #yes
+	#logfile /var/log/redis_6379.log
+	appendonly no
+
+cd /var/lib/redis/
+rm -rf ./*
+mkdir 6379 6380 6381
+redis-server /root/test/6379.conf
+redis-server /root/test/6380.conf
+redis-server /root/test/6381.conf
+
+三个redis全部启动后,将6379设置成主
+redis-cli -p 6379
+redis-cli -p 6380
+redis-cli -p 6381
+6380的redis-cli执行
+	REPLICAOF 127.0.0.1 6379
+
+6379 set k1 aaa
+6379 get k1 
+6380 get k1 #成功
+6380 set k2 bbb #失败
+
+6381和6380的redis-cli执行
+	REPLICAOF 127.0.0.1 6379
+6381 set k2 ddd
+追随6379成功后 老的数据会删除
+
+情景:6381挂了
+重新启动6381后追随6379,数据是增量同步还是从头开始？？？
+redis-server /root/test/6381.conf --replicaof 127.0.0.1 6379
+
+redis-server /root/test/6381.conf --replicaof 127.0.0.1 6379 --appendonly yes #会再次落RDB
+
+如果主6379挂了
+6380的redis-cli执行
+	REPLICAOF no one #不在追随6379
+6381的redis-cli执行
+	REPLICAOF 127.0.0.1 6380
+	
+配置文件:主从复制
+replica-serve-stale-data yes #是否同步完再传输数据
+replica-read-only yes #备机是否支持写入
+# repl-backlog-size 1mb #增量复制 超过设置大小 需要全量复制同步
+# min-replicas-to-write 3 #最少给几个从写成功
+# min-replicas-max-lag 10 #
+
+问题！！！
+需要人工维护
+```
+
+
+
+### 哨兵 Sentinel
+
+```shell
+哨兵 Sentinel (HA)
+Redis Sentinel是Redis官方的高可用性解决方案
+    监控(Monitoring)
+    提醒(Notification)
+    自动故障迁移(Automatic failover)
+
+演示:http://redis.cn/topics/sentinel.html
+cd /root/test
+vim 26379.conf
+	port 26379
+	sentinel monitor mymaster 127.0.0.1 6379 2
+
+cp 26379.conf 26380.conf
+	port 26380
+	sentinel monitor mymaster 127.0.0.1 6379 2
+cp 26379.conf 26381.conf
+	port 26381
+	sentinel monitor mymaster 127.0.0.1 6379 2
+
+redis-server /root/test/6379.conf
+redis-server /root/test/6380.conf --replicaof 127.0.0.1 6379
+redis-server /root/test/6381.conf --replicaof 127.0.0.1 6379
+
+/root/redis-5.0.12/src #sentinel
+/opt/111/redis6/bin #sentinel
+redis-server  /root/test/26379.conf --sentinel
+通过发布订阅 知道主对应的slave
+redis-server  /root/test/26380.conf --sentinel #启动后可以发现其他哨兵
+redis-server  /root/test/26381.conf --sentinel
+6379主挂了后,sentinel会重新选出新的主
+sentinel会修改26379.conf等配置文件
+
+redis-cli -p 6381
+	PSUBSCRIBE * #可以查看sentinel之间通信
+sentinel的配置文件:
+/root/redis-5.0.12/sentinel.conf
+
+```
+
+
+
+### cluster 集群
+
+```shell
+容量问题:数据没办法划分拆解,sharding分片
+	算法:hash table 扩展性差
+	逻辑:random
+	一致性hash 没有取模:hash映射算法。优点:可以解决其他结点压力；缺点:小部分数据无法命中
+弊端:3个模式不能做数据库用
+
+客户端与redis中间添加一层代理层
+可以使用nginx,无状态！！！
+
+cluster 集群
+无主模型:没有主
+每个redis都知道其他的redis,并且都存储了对应的数据分片槽位信息
+Redis 集群有16384个哈希槽,每个key通过CRC16校验后对16384取模来决定放置哪个槽.集群的每个节点负责一部分hash槽,
+
+分治问题:聚合操作很难实现事务,数据可能不在一个redis
+hash tag
+
+客户端分区就是在客户端就已经决定数据会被存储到哪个redis节点或者从哪个redis节点读取。大多数客户端已经实现了客户端分区。
+代理分区 意味着客户端将请求发送给代理,然后代理决定去哪个节点写数据或者读数据。代理根据分区规则决定请求哪些Redis实例,然后根据Redis的响应结果返回给客户端。redis和memcached的一种代理实现就是Twemproxy
+查询路由(Query routing) 的意思是客户端随机地请求任意一个redis实例,然后由Redis将请求转发给正确的Redis节点。Redis Cluster实现了一种混合形式的查询路由,但并不是直接将请求从一个redis节点转发到另一个redis节点,而是在客户端的帮助下直接redirected到正确的redis节点
+
+演示:
+一 使用twemproxy
+https://github.com/twitter/twemproxy #一致性hash代理
+mkdir /root/twemproxy
+cd /root/twemproxy
+git clone https://github.com/twitter/twemproxy.git #下载源码
+# yum update nss #如果有报错
+cd /root/twemproxy/twemproxy
+yum install -y automake  libtool #需要先安装
+autoreconf -fvi #顺序执行
+./configure --enable-debug=full
+make
+src/nutcracker -h
+
+cd /root/twemproxy/twemproxy/scripts
+cp  nutcracker.init  /etc/init.d/twemproxy #拷贝并修改名称
+cd /etc/init.d
+chmod +x twemproxy
+
+vim nutcracker.init #查看 按条件创建标签页
+mkdir  /etc/nutcracker
+cd /root/twemproxy/twemproxy/conf
+cp ./* /etc/nutcracker/
+cd /etc/nutcracker/ #查看复制后的信息
+
+cd /root/twemproxy/twemproxy/src
+cp nutcracker /usr/bin #程序和脚本放到对应的位置 其他位置可以执行
+
+cd /etc/nutcracker
+cp nutcracker.yml nutcracker.yml.bak #备份配置文件
+vim nutcracker.yml #修改配置文件
+	alpha:
+  listen: 127.0.0.1:22121
+  hash: fnv1a_64
+  distribution: ketama
+  auto_eject_hosts: true
+  redis: true
+  server_retry_timeout: 2000
+  server_failure_limit: 1
+  servers:
+   - 127.0.0.1:6379:1
+   - 127.0.0.1:6380:1
+
+mkdir -p /root/data/6379
+redis-server --port 6379
+mkdir -p /root/data/6380 #redis-server当前目录启动,就是当持久化目录
+redis-server --port 6380
+
+cd /etc/init.d #准备启动服务
+./twemproxy start
+redis-cli -p 22121
+set XXX #放入数据后  单独连接6379和6380查看的数据是不同的
+
+22121端口不支持keys * 或者watch 等事务操作
+
+二 :使用predixy
+https://github.com/joyieldInc/predixy
+wget https://github.com/joyieldInc/predixy/releases/download/1.0.5/predixy-1.0.5-bin-amd64-linux.tar.gz
+
+vim 命令行模式
+光标位置 --> shift+: --> .,$s/#//
+. 表示光标位置 $ 表示最后一行 s 表示替换  将#替换成空
+
+三:redis创建cluster
+cd /root/redis-5.0.12/utils/create-cluster
+vim README #创建的步骤 
+vim create-cluster #查看集群配置
+	NODES=6 #六个节点
+	REPLICAS=1 #三个主 三个从
+./create-cluster start #开启redis实例
+	Starting 30001
+    Starting 30002
+    Starting 30003
+    Starting 30004
+    Starting 30005
+    Starting 30006
+./create-cluster create #输出提示
+    >>> Performing hash slots allocation on 6 nodes...
+    Master[0] -> Slots 0 - 5460
+    Master[1] -> Slots 5461 - 10922
+    Master[2] -> Slots 10923 - 16383
+    Adding replica 127.0.0.1:30005 to 127.0.0.1:30001
+    Adding replica 127.0.0.1:30006 to 127.0.0.1:30002
+    Adding replica 127.0.0.1:30004 to 127.0.0.1:30003
+
+redis-cli -p 30001 #进入客户端无法set k1 sss
+redis-cli -c  -p 30001 #进入正确客户端
+开启事务需要再正确的节点上
+
+正确开启事务方法 #添加{oo} 类似分组
+    set {oo}k1 aaa
+    WATCH {oo}k1
+    MULTI
+    set {oo}k1 sss
+    exec
+    get {oo}k1
+
+./create-cluster stop #关闭集群
+./create-cluster clean #清理
+
+重新启动,手动分配槽位！！！
+./create-cluster start
+redis-cli --cluster help #查看帮助
+./create-cluster start
+redis-cli --cluster create 127.0.0.1:30001 127.0.0.1:30002 127.0.0.1:30003 127.0.0.1:30004 127.0.0.1:30005 127.0.0.1:30006  --cluster-replicas 1
+
+redis-cli -c  -p 30001 #进入客户端
+
+演示 reshard !!!
+redis-cli --cluster  reshard  127.0.0.1:30001
+	输入移动数量 
+	输入移入节点的ID:7b371134ef1c83a2e4e950b52c862298a3d23663
+	输入移出节点的ID:2ad1e58c2b88dab125125f4af11ad0fa3835414e
+	完成:done
+redis-cli --cluster info 127.0.0.1:30001 #查看移动后的信息
+redis-cli --cluster check  127.0.0.1:30001
+
+无法精准移动槽位
+
+备注:多台机器纯手工搭建cluster 需要redis启动时添加参数 enable (参考官网)
+```
+## Redis 击穿、穿透、雪崩、分布式锁
+### 击穿、穿透、雪崩
+```
+redis常用做缓存
+	key有过期时间
+	lru、lfu淘汰了部分数据
+	
+击穿:客户端访问的数据不在缓存中,访问直接透传到数据库
+	设置锁 1 get key 2 setnx 3-1 ok 去DB 3-2 false sleep
+	dead lock:设置锁的过期时间
+	锁超时了:多线程 一个线程取DB 一个线程监控是否取回,更新锁的时间
+	
+雪崩:客户端访问的大量数据不在缓存中,大量访问直接透传到数据库
+	时点性无关:随机过期时间 
+	零点 强依赖击穿方案 零点延时
+	
+穿透:客户端访问到数据库不存再的数据 
+	布隆过滤器:
+		1 放到客户端 2 客户端只包含算法 bitmap-->redis无状态 3 redis集成布隆
+	布隆过滤器缺点:只能增加,不能删除(换其他,比如布谷鸟)
+```
+
+架构师需要层层限流,并且全局考虑成本等问题,不要因为技术而技术！！！
+
+
+
+### 分布式锁

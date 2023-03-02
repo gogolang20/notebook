@@ -1,0 +1,200 @@
+## 1 Kafka初始,架构模型,角色功能梳理
+
+### Kafka  what why how 
+分布式:可靠的 可扩展 高性能
+
+AKF:
+x 节点单点故障 高可用
+y 业务划分 topic
+z 分片分治 partition
+
+```
+两个独立的 普遍的问题
+    1 单点问题
+    2 性能问题 --> kafka业务区分
+
+生产者生成数据 放入topic的不同分区,消费者如何有序消费？？？
+1 无关数据分散到不同的分区,并发并行消费
+2 有关的数据,一定要按原有顺序发送到同一个分区里
+
+分区--> X轴 副本 不同的主机之间
+
+offset -->  分区内部数据是有序的,分区外部无序
+offset 新版本不需要存放到zookeeper中
+
+broker相当于一个进程,一台主机可以启动多个,但是一般只启动一个
+broker 选 leader 会用到zookeeper
+
+```
+
+```
+生产数据:数据亲密性,不同的数据打入不同的分区
+消费数据:数据可以重复被消费,但是一个消费组只能消费一次,不然会导致数据错误
+
+在consumer 消费的时候:数据丢失；数据重复 问题如何解决？？？
+runtime内存里维护了自己的offset(偏移量的进度)
+#老版本0.8之前 offset是zookeeper维护(对zookeeper影响很大,不推荐)
+#topic自己维护offset
+#也可以使用第三方 redis mysql维护offset(不推荐)
+
+围绕offset,也就是消费的进度  节奏？ 频率？ 先后？
+    1 异步的 5s之内,先干活,5秒到了持久化offset --> 可能丢失offset,造成重复消费
+    2 同步的 业务的操作和offset的持久化
+    3 没有控制好顺序,offset持久了,但是业务写失效了 
+
+```
+
+```
+topic数据 offset两阶段:内存 到 持久化
+
+Kafka与磁盘和网卡的技术点
+	推导出业务逻辑的设计
+	顺序IO ZeroCopy(sendfile) DMI(协处理器)
+```
+
+## 2 Kafka集群搭建,topic+partition消费逻辑梳理
+### Kafka集群搭建
+
+```shell
+node配置
+ThinkPad:
+node01	192.168.245.152
+node02	192.168.245.154
+node03	192.168.245.155
+node04	192.168.245.156
+
+node01 - node04
+Kafka:node01-node03
+zookeeper:node02-node04
+
+
+同步时钟
+yum install -y ntp
+#ntpdate ntp[1-7].aliyun.com  七个服务器
+ntpdate ntp1.aliyun.com
+clock -w #同步
+
+
+cd /opt
+wget https://mirrors.tuna.tsinghua.edu.cn/apache/kafka/2.8.1/kafka_2.13-2.8.1.tgz --no-check-certificate
+#wget https://mirrors.tuna.tsinghua.edu.cn/apache/kafka/2.8.0/kafka_2.13-2.8.0.tgz
+scp kafka_2.13-2.8.0.tgz root@192.168.245.152:`pwd`
+
+Kafka配置文件修改
+cd /opt/kafka_2.13-2.8.0/config
+vim server.properties 
+    broker.id=0 1 2 ##Kafka node
+    listeners=PLAINTEXT://192.168.245.152:9092 #Kafka node IP
+    log.dirs=/var/kafka-logs
+zookeeper.connect=192.168.245.154:2181,192.168.245.155:2181,192.168.245.156:2181/kafka #zookeeper node IP
+
+vim /etc/profile
+	export KAFKA_HOME=/opt/kafka_2.13-2.8.0
+	export PATH=$KAFKA_HOME/bin
+
+kafka启动:
+zkServer.sh start #启动zookeeper
+kafka-server-start.sh  ./server.properties #简单启动
+
+zkCli.sh #启动一个zookeeper节点
+	ls /
+	get  /kafka/cluster/id #查看内部
+
+创建topic
+cd $KAFKA_HOME/ #新窗口打开node03演示
+cd bin/ #执行命令
+
+
+kafka-topics.sh --zookeeper  192.168.245.154:2181,192.168.245.155:2181/kafka  --create  --topic qqqq  --partitions 2  --replication-factor  2
+#192.168.245.155:22181/kafka  指定zk中根目录下的节点
+
+kafka-topics.sh --zookeeper  192.168.245.154:2181,192.168.245.155:2181/kafka  --list
+kafka-topics.sh --zookeeper  192.168.245.154:2181,192.168.245.155:2181/kafka  --describe  --topic qqqq #查看
+
+```
+
+### 演示！！！
+```shell
+演示！！！
+node02新开窗口:创建消费者  连接Kafka的node  
+cd /opt/kafka_2.13-2.8.0/bin 
+kafka-console-consumer.sh #查看帮助
+kafka-console-consumer.sh --bootstrap-server  192.168.245.152:9092,192.168.245.154:9092  --topic qqqq  --group msb
+# --group msb 消费者归属哪个组
+> #接收到不同的信息
+kafka-console-consumer.sh --bootstrap-server  192.168.245.152:9092,192.168.245.154:9092  --topic qqqq  --group msb
+再次开启一个 --topic qqqq 消费者,消息只有一个 消费者可以接受到
+因为两个是同组的 --group msb
+
+node01新开窗口:创建生产者
+cd /opt/kafka_2.13-2.8.0/bin 
+kafka-console-producer.sh #查看帮助
+kafka-console-producer.sh  --broker-list  192.168.245.155:9092  --topic qqqq
+>hello01 #消费者收到数据
+>he #不可以向上向下翻
+
+消费者是订阅topic
+
+node03新开窗口:
+kafka-consumer-groups.sh
+kafka-consumer-groups.sh  --bootstrap-server 192.168.245.154:9092 --list
+kafka-consumer-groups.sh  --bootstrap-server 192.168.245.154:9092 --describe --group msb
+
+zookeeper客户端查看
+ls /kafka/brokers/topics #[qqqq, __consumer_offsets]
+get  /kafka/brokers/topics/__consumer_offsets #50个partitions
+
+```
+
+```
+分区 --> 消息 --> 有序性,有没有,怎么保证？？？
+1 如果没有顺序上的约束:分区是水平扩展
+	消息是v
+2 一但消息(消息很多,但是消息种类很多),而且需要同一类消息的有序性
+    消息是 k v,相同的key 一定去到一个分区里,
+    broker会保证 生产者 推送的消息的顺序
+	一个分区里可能有不同的key,且不同的key 是交叉的,或者说相同的key 在一个里而分区里没有排列在一起
+
+```
+
+### offset！！！
+```
+Kafka消费者 消费数据使用的拉取方式！！！
+	自主 按需
+	拉取粒度？ 批次
+
+消费者拿到数据批次 是单线程还是多线程处理 ???   !!!
+    1 单线程:一条一条处理,按顺序处理的时候,来更新offset,速度较慢
+    	事务方式处理
+    1-1 多线程,offset如何维护 ??? 按条,还是按批 ???
+		consumer 按批拉取数据
+	追求多线程的性能,减少事务,减少对数据库的压力
+	2 多线程 流式计算 充分利用线程
+	
+按批拉取,数据的重复消费,丢失问题如何解决？？？
+	批次的头或尾的绝对更新,依赖了事务的反馈
+    1 大数据的多线程处理方案:spark
+    2 流式计算
+访问redis --> 访问DB --> offset
+步骤进行拆分,该并行的并行,该独立的独立。落地DB以事务方式(通过redis获取数据,完善每一条记录的内容)
+
+Kafka consumer以什么粒度 更新&持久化 offset ?
+分上面的场景:单线程 多线程
+
+备注:什么情况下多线程的优势发挥到极致:具备隔离性 !
+```
+
+
+
+## Go连接Kafka 使用API (个人拓展)
+
+```shell
+#https://duoke360.com/post/112
+bin/kafka-server-start.sh config/server.properties #启动 kafka 服务
+bin/kafka-topics.sh --create --partitions 1 --replication-factor 1 --topic test-go --bootstrap-server localhost:9092 #创建 topic 分区
+
+bin/kafka-console-producer.sh --topic test-go --bootstrap-server localhost:9092 #启动 kafka 生产者
+bin/kafka-console-consumer.sh --topic test-go --from-beginning --bootstrap-server localhost:9092 #启动 kafka 消费者
+bin/kafka-console-consumer.sh --topic topic1 --from-beginning --bootstrap-server localhost:9092 #启动 kafka 消费者
+
+```

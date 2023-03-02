@@ -1,0 +1,289 @@
+Zookeeper
+
+## Zookeeper介绍、安装、shell cli 使用,基本概念验证
+
+```shell
+zookeeper官网:https://zookeeper.apache.org/
+ZooKeeper data is kept in-memory
+
+集群模式分类:主从模式 无主模型	复制集群 分片集群
+ZooKeeper是主从复制集群
+主的单点故障问题？？？
+	出现不可用状态-->不可用状态回复到可用状态应该越快越好
+
+
+zookeeper是一个目录树结构
+zookeeper每个node可以存储1M数据
+	持久节点
+	序列节点
+	临时节点-->session:通过session实现锁,连接断开session也会消失
+每个客户端连接到zookeeper都会产生一个session 来代表这个客户端
+
+
+Sequential Consistency - Updates from a client will be applied in the order that they were sent.
+
+Atomicity - Updates either succeed or fail. No partial results.
+
+Single System Image - A client will see the same view of the service regardless of the server that it connects to. i.e., a client will never see an older view of the system even if the client fails over to a different server with the same session.
+
+Reliability - Once an update has been applied, it will persist from that time forward until a client overwrites the update.
+
+Timeliness - The clients view of the system is guaranteed to be up-to-date within a certain time bound.
+```
+
+### Zookeeper集群搭建
+
+```shell
+安装3.4.6版本zookeeper,安装包再附录链接中
+zookeeper安装:四个node主机
+ThinkPad:
+node01	192.168.245.152
+node02	192.168.245.154
+node03	192.168.245.155
+node04	192.168.245.156
+
+配置Java环境变量 jps命令 查看是否成功
+
+cd /usr/local
+rpm -ivh jdk-8u181-linux-x64.rpm
+#yum localinstall -y jdk-8u181-linux-x64.rpm
+	export JAVA_HOME=/usr/java/default
+    export CLASSPATH=.
+    export PATH=$PATH:$JAVA_HOME/bin
+scp jdk-8u181-linux-x64.rpm root@192.168.245.154:`pwd`
+scp jdk-8u181-linux-x64.rpm root@192.168.245.155:`pwd`
+scp jdk-8u181-linux-x64.rpm root@192.168.245.156:`pwd`
+
+mkdir /opt/zk
+mv zookeeper-3.4.6.tar.gz /opt/zk/
+
+#wget https://archive.apache.org/dist/zookeeper/zookeeper-3.7.0/apache-zookeeper-3.7.0.tar.gz
+
+tar -xf zookeeper-3.4.6.tar.gz
+cd /opt/zk/zookeeper-3.4.6/conf
+cp zoo_sample.cfg zoo.cfg
+vim zoo.cfg
+	dataDir=/var/zookeeper/zk #修改后
+server.1=192.168.245.152:2888:3888
+server.2=192.168.245.154:2888:3888
+server.3=192.168.245.155:2888:3888
+server.4=192.168.245.156:2888:3888
+    #2888 node业务通信端口
+    #3888 node选主通信端口
+mkdir -p /var/zookeeper/zk
+cd /var/zookeeper/zk
+vim myid
+	1 #写入当前node 的ID #四个node各不相同
+cd /opt #将安装的 zookeeper 分发到其他node
+scp -r ./zk root@192.168.245.154:`pwd`
+scp -r ./zk root@192.168.245.155:`pwd`
+scp -r ./zk root@192.168.245.156:`pwd`
+
+mkdir -p /var/zookeeper/zk
+echo 2 > /var/zookeeper/zk/myid
+
+配置zookeeper环境变量
+vim /etc/profile
+	export ZOOKEEPER_HOME=/opt/zk/zookeeper-3.4.6
+	export PATH=$JAVA_HOME/bin:$PATH:$ZOOKEEPER_HOME/bin
+source /etc/profile
+scp /etc/profile root@192.168.245.154:/etc
+scp /etc/profile root@192.168.245.155:/etc
+scp /etc/profile root@192.168.245.156:/etc
+
+启动zookeeper
+zkServer.sh help #查看启动帮助
+
+zkServer.sh start-foreground #前台运行
+zkServer.sh status #查看节点状态 主还是从
+zkCli.sh #启动客户端 默认连接自己
+	help #查看命令
+create /ooxx "" #创建一个 结点
+create /ooxx/xxoo ""
+set /ooxx "hellp" #放入数据 #二进制安全的
+get /ooxx #查看结点数据
+
+```
+
+
+
+```shell
+leader node将所有事务递增记录
+Zxid #64位表示  前32位表示leader纪元,第几任leader   后32位表示事务递增id ！！！
+
+cZxid	#事务id
+mZxid	#
+pZxid	#
+
+ephemeralOwner #临时拥有者
+create -e #创建临时结点 session结束回收
+create -s #序列化  区分同一目录下创建数据
+
+如果客户端当前连接的node挂了,重新与其他node建立连接,session会怎么样？？？
+session创建会递增 Zxid 
+客户端断开也会递增 Zxid 
+
+```
+
+```
+总结
+1 统一配置管理 1M数据
+2 分组管理 path结构
+3 统一命名 sequential
+4 同步 临时节点 --> 分布式锁 --> 依托一个父节点,且具备-s,代表父节点下可以有多把锁
+
+可以做HA,选主
+不要把zookeeper当数据库使用
+```
+
+netstat -natp | egrep '(2888|3888)' #查看端口连接状态
+
+
+## Zookeeper原理知识,paxos、zab、角色功能、API开发基础
+
+### Paxos
+
+```
+zookeeper分布式协调
+扩展,可靠性,时序性,快速
+
+扩展--> 框架架构--> 角色--> leader/follower/observer
+	--> 读写分离 --> 只有follower才能选举
+	--> zoo.cfg  server.4=node04:2888:3888:observer 
+
+可靠性--> 快速恢复leader
+	--> 数据可靠 可用 一致性--> 最终一致性,过程中 节点是否对外提供服务
+
+```
+
+```
+Paxos 默认没有拜占庭将军问题,只有在一个可信的计算环境中才能成立,这个环境是不会被入侵所破坏的。
+Paxos:它是一个基于消息传递的一致性算法
+
+过半通过
+最终一致性
+
+```
+
+```
+参考网站:https://www.douban.com/note/208430424/
+
+Paxos,它是一个基于消息传递的一致性算法,Leslie Lamport在1990年提出,近几年被广泛应用于分布式计算中,Google的Chubby,Apache的Zookeeper都是基于它的理论来实现的,Paxos还被认为是到目前为止唯一的分布式一致性算法,其它的算法都是Paxos的改进或简化。有个问题要提一下,Paxos有一个前提:没有拜占庭将军问题。就是说Paxos只有在一个可信的计算环境中才能成立,这个环境是不会被入侵所破坏的。
+
+关于Paxos的具体描述可以在Wiki中找到:http://zh.wikipedia.org/zh-cn/Paxos算法。网上关于Paxos分析的文章也很多。这里希望用最简单的方式加以描述并建立起Paxos和ZK Server的对应关系。
+
+Paxos描述了这样一个场景,有一个叫做Paxos的小岛(Island)上面住了一批居民,岛上面所有的事情由一些特殊的人决定,他们叫做议员(Senator)。议员的总数(Senator Count)是确定的,不能更改。岛上每次环境事务的变更都需要通过一个提议(Proposal),每个提议都有一个编号(PID),这个编号是一直增长的,不能倒退。每个提议都需要超过半数((Senator Count)/2 +1)的议员同意才能生效。每个议员只会同意大于当前编号的提议,包括已生效的和未生效的。如果议员收到小于等于当前编号的提议,他会拒绝,并告知对方:你的提议已经有人提过了。这里的当前编号是每个议员在自己记事本上面记录的编号,他不断更新这个编号。整个议会不能保证所有议员记事本上的编号总是相同的。现在议会有一个目标:保证所有的议员对于提议都能达成一致的看法。
+
+好,现在议会开始运作,所有议员一开始记事本上面记录的编号都是0。有一个议员发了一个提议:将电费设定为1元/度。他首先看了一下记事本,嗯,当前提议编号是0,那么我的这个提议的编号就是1,于是他给所有议员发消息:1号提议,设定电费1元/度。其他议员收到消息以后查了一下记事本,哦,当前提议编号是0,这个提议可接受,于是他记录下这个提议并回复:我接受你的1号提议,同时他在记事本上记录:当前提议编号为1。发起提议的议员收到了超过半数的回复,立即给所有人发通知:1号提议生效！收到的议员会修改他的记事本,将1好提议由记录改成正式的法令,当有人问他电费为多少时,他会查看法令并告诉对方:1元/度。
+
+现在看冲突的解决:假设总共有三个议员S1-S3,S1和S2同时发起了一个提议:1号提议,设定电费。S1想设为1元/度, S2想设为2元/度。结果S3先收到了S1的提议,于是他做了和前面同样的操作。紧接着他又收到了S2的提议,结果他一查记事本,咦,这个提议的编号小于等于我的当前编号1,于是他拒绝了这个提议:对不起,这个提议先前提过了。于是S2的提议被拒绝,S1正式发布了提议: 1号提议生效。S2向S1或者S3打听并更新了1号法令的内容,然后他可以选择继续发起2号提议。
+
+好,我觉得Paxos的精华就这么多内容。现在让我们来对号入座,看看在ZK Server里面Paxos是如何得以贯彻实施的。
+
+小岛(Island)——ZK Server Cluster
+
+议员(Senator)——ZK Server
+
+提议(Proposal)——ZNode Change(Create/Delete/SetData…)
+
+提议编号(PID)——Zxid(ZooKeeper Transaction Id)
+
+正式法令——所有ZNode及其数据
+
+貌似关键的概念都能一一对应上,但是等一下,Paxos岛上的议员应该是人人平等的吧,而ZK Server好像有一个Leader的概念。没错,其实Leader的概念也应该属于Paxos范畴的。如果议员人人平等,在某种情况下会由于提议的冲突而产生一个“活锁”(所谓活锁我的理解是大家都没有死,都在动,但是一直解决不了冲突问题)。Paxos的作者Lamport在他的文章”The Part-Time Parliament“中阐述了这个问题并给出了解决方案——在所有议员中设立一个总统,只有总统有权发出提议,如果议员有自己的提议,必须发给总统并由总统来提出。好,我们又多了一个角色:总统。
+
+总统——ZK Server Leader
+
+又一个问题产生了,总统怎么选出来的？oh, my god! It’s a long story
+
+现在我们假设总统已经选好了,下面看看ZK Server是怎么实施的。
+
+情况一:
+
+屁民甲(Client)到某个议员(ZK Server)那里询问(Get)某条法令的情况(ZNode的数据),议员毫不犹豫的拿出他的记事本(local storage),查阅法令并告诉他结果,同时声明:我的数据不一定是最新的。你想要最新的数据？没问题,等着,等我找总统Sync一下再告诉你。
+
+情况二:
+
+屁民乙(Client)到某个议员(ZK Server)那里要求政府归还欠他的一万元钱,议员让他在办公室等着,自己将问题反映给了总统,总统询问所有议员的意见,多数议员表示欠屁民的钱一定要还,于是总统发表声明,从国库中拿出一万元还债,国库总资产由100万变成99万。屁民乙拿到钱回去了(Client函数返回)。
+
+情况三:
+
+总统突然挂了,议员接二连三的发现联系不上总统,于是各自发表声明,推选新的总统,总统大选期间政府停业,拒绝屁民的请求。
+```
+
+
+### Zab
+```
+zab:zookeeper 原子广播协议
+	作用在可用状态(有leader)
+原子:成功或者失败,没有中间状态
+广播:分布式多节点的,全部知道
+
+zookeeper的数据状态在内存
+用磁盘保存日志
+
+消息是放到队列中,最终数据会一致
+follower可以sync同步leader的数据
+leader同步信息两阶段:一 写入日志 二 写到内存
+
+场景一 第一次启动集群！！！
+情景二 重启集群,挂了后！！！
+自己会有myid  Zxid事务ID
+
+新的leader 需要具备什么？
+数据最全 Zxid
+myid
+过半通过的数据才是真数据,你见到的可用的Zxid
+
+zookeeper选举过程!!!
+1 3888造成两两通信
+2 只要任何人投票 都会触发 准leader发起自己的投票
+3 推选制:先比较Zxid 相同再比较myid
+
+```
+
+### Watch
+
+```
+zookeeper:
+1 统一视图:访问任何node看到的数据是一样的
+2 目录树结构
+3 Watch
+
+方向性 时效性
+心跳:主动访问node是否正常
+Watch:zookeeper监控node,node挂了之后触发callback回调
+callback需要先注册 监控基于session
+```
+
+
+
+## Zookeeper案例:分布式配置注册发现、分布式锁、ractive模式编程
+
+### 分布式配置
+
+```
+服务器配置变更需要通过watch 获知 --> zookeeper配置数据data
+```
+
+### 分布式锁
+```
+zookeeper分布式锁 
+1 争抢锁 只有一个人能获得锁
+2 获得锁的人出问题,临时节点(session) 
+3 获得锁的人成功了,释放锁
+4 锁被释放 删除,别人怎么知道
+4-1 主动轮询 心跳... 延迟 压力
+4-2 watch:callback解决延迟问题,弊端 压力
+4-3 序列节点(create -s)+watch:watch谁? watch前一个,最小的一个获得锁
+一旦最小的释放了锁,zk只给第二个发事件回调
+锁的重入概念
+```
+
+
+GitHub资料网址:
+大数据:https://github.com/msbbigdata 
+分布式网络:https://github.com/bjmashibing
+算法:https://github.com/algorithmzuo
+
+百度盘链接:https://pan.baidu.com/s/1XmsMWAQ1P_KlxS1Ktxu_2Q 密码:tkj6
