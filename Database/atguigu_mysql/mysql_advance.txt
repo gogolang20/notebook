@@ -20,7 +20,48 @@ mysql> show variables like 'datadir';
 用户的创建 修改 删除
 mysql> use mysql
 mysql> create user 'zhangsan' identified by 'abc123';
+mysql> create user 'zhangsan'@'localhost' identified by 'abc123';
+mysql> create user 'lisi'@'localhost' identified by 'abc123';
 mysql> select host,user from user;
+mysql> show grants\G
+mysql> update user set user='wangwu' where user='lisi';
+mysql> flush privileges; # 权限生效 !!!
+mysql> drop user 'wangwu'@'localhost';
+
+配置文件 系统变量 
+
+
+Mysql逻辑架构
+C/S 架构
+客户端 == 处理链接 == 查询缓存 == 语法分析 == 查询优化 == 数据库engine == 文件系统
+
+
+SQL执行流程
+mysql> show global variables like '%query_cache_type%'; # 5.7 版本
+mysql> show variables like 'Qcache%';
+
+优化器生成执行计划
+
+mysql> select @@session.profiling;
+mysql> show variables like 'profiling';
+mysql> set profiling=1;
+mysql> select * from employees;
+mysql> select * from employees;
+mysql> show profiles;
+mysql> show profile for query 2;
+
+mysql> show variables like 'innodb_buffer_pool_size';
+mysql> set global innodb_buffer_pool_size = 268435456;
+mysql> show variables like 'innodb_buffer_pool_instances';
+
+
+存储引擎 (InnoDB !!!)
+mysql> show engines;
+| InnoDB             | DEFAULT | Supports transactions, row-level locking, and foreign keys
+mysql> select @@default_storage_engine;
+mysql> set default_storage_engine = MyISAM;
+mysql> set default_storage_engine = InnoDB;
+InnoDB 支持事务 行锁 外键
 
 
 #----------------------------------------------------------#----------------------------------------------------------#
@@ -28,7 +69,6 @@ mysql> select host,user from user;
 #----------------------------------------------------------#----------------------------------------------------------#
 
 索引是帮助MySQL高效获取数据的数据结构
-MySQL索引使用B+树结构
 
 ### 索引的分类
 
